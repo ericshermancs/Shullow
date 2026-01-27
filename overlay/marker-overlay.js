@@ -1,0 +1,1 @@
+// Marker overlay JavaScript for Map POI Injector
