@@ -58,6 +58,25 @@ export async function loadPOIGroups(useSyncStorage = false) {
 }
 
 /**
+ * Renames a group.
+ */
+export async function renamePOIGroup(oldName, newName, useSyncStorage = false) {
+  if (!oldName || !newName) return;
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['poiGroups']);
+    const poiGroups = data.poiGroups || {};
+    if (poiGroups[oldName]) {
+      poiGroups[newName] = poiGroups[oldName];
+      delete poiGroups[oldName];
+      await storage.set({ poiGroups });
+    }
+  } catch (error) {
+    console.error('Error renaming group:', error);
+  }
+}
+
+/**
  * Deletes a group.
  */
 export async function deletePOIGroup(groupName, useSyncStorage = false) {
