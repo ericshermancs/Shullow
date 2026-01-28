@@ -152,39 +152,62 @@ class OverlayManager {
   showPopup(poi, x, y, color) {
     this.hidePopup();
     
+    // Store popup anchor data to update position on move
+    this.activePopupData = { poi, color };
+    
     this.activePopup = document.createElement('div');
     this.activePopup.className = 'poi-detail-popup';
     this.activePopup.style.cssText = `
       position: absolute; left: ${x}px; top: ${y - 42}px; transform: translate(-50%, -100%);
-      background: rgba(0, 0, 0, 0.95); color: ${color}; font-family: monospace; font-size: 12px;
-      border: 1px solid ${color}; padding: 10px; z-index: 2147483647; pointer-events: none;
-      white-space: normal; width: max-content; max-width: 250px;
+      background: rgba(0, 0, 0, 0.95); color: #ffffff; font-family: monospace; font-size: 12px;
+      border: 1px solid ${color}; padding: 10px; z-index: 2147483647; pointer-events: auto;
+      white-space: normal; width: max-content; max-width: 250px; cursor: default;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 10px ${color}44; border-radius: 4px;
+      transition: top 0.1s linear, left 0.1s linear; /* Smooth movement like pins */
     `;
+    
+    // Allow hovering popup to keep it open
+    this.activePopup.onmouseenter = () => {
+       if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+    };
+    this.activePopup.onmouseleave = () => {
+       this.hidePopup();
+    };
+
     this.activePopup.innerHTML = `
-      <div style="font-weight: bold; border-bottom: 1px solid ${color}; margin-bottom: 6px; padding-bottom: 4px; color: #fff;">${poi.name}</div>
-      <div style="font-size: 10px; opacity: 0.9;">GROUP: ${poi.groupName.toUpperCase()}</div>
-      <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: ${color};">${poi.address || 'No address available'}</div>
-      ${Object.entries(poi).filter(([k]) => !['name', 'groupName', 'address', 'latitude', 'longitude'].includes(k)).map(([k,v]) => 
-        `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px;">${k.toUpperCase()}: ${v}</div>`
-      ).join('')}
+      <div style="font-weight: bold; border-bottom: 1px solid ${color}; margin-bottom: 6px; padding-bottom: 4px; color: #ffffff !important;">${poi.name}</div>
+      <div style="font-size: 10px; opacity: 0.9; color: #cccccc !important;">GROUP: ${poi.groupName.toUpperCase()}</div>
+      <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: #ffffff !important;">${poi.address || 'No address available'}</div>
+      ${Object.entries(poi)
+         .filter(([k, v]) => !['name', 'groupName', 'address', 'latitude', 'longitude', 'id'].includes(k) && v !== null && v !== undefined && String(v).trim() !== '')
+         .map(([k,v]) => `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px; color: #dddddd !important;">${k.toUpperCase()}: ${v}</div>`)
+         .join('')}
     `;
     this.overlay.appendChild(this.activePopup);
   }
 
   hidePopup() {
-    if (this.activePopup) { this.activePopup.remove(); this.activePopup = null; }
+    if (this.activePopup) { this.activePopup.remove(); this.activePopup = null; this.activePopupData = null; }
     if (this.hoverTimeout) { clearTimeout(this.hoverTimeout); this.hoverTimeout = null; }
   }
 
+  // Prevent flicker by debouncing render if high frequency, but allow immediate for smooth drag
   render() {
     if (!this.overlay || !this.mapBounds || !this.viewportBounds) return;
-    this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
-    this.hidePopup();
+    
+    // REDFIN FLICKER FIX:
+    // If popup is active, allow render but DO NOT destroy pins.
+    // Instead, update both pins AND the popup position.
+    
     const pref = window.poiState.preferences;
     const host = window.location.hostname;
     const sitePref = pref.sitePreferences?.[host] || { overlayEnabled: true };
-    if (!sitePref.overlayEnabled) { this.updateDebug(); return; }
+    if (!sitePref.overlayEnabled) { 
+        this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
+        this.updateDebug(); 
+        return; 
+    }
+
     const b = this.mapBounds;
     const w = this.viewportBounds.width;
     const h = this.viewportBounds.height;
@@ -194,32 +217,97 @@ class OverlayManager {
     };
     const minLatProj = projectY(b.south);
     const maxLatProj = projectY(b.north);
-    this.markerData.forEach(poi => {
+
+    // Update active popup position if it exists
+    if (this.activePopup && this.activePopupData) {
+       const pLat = parseFloat(this.activePopupData.poi.latitude);
+       const pLng = parseFloat(this.activePopupData.poi.longitude);
+       
+       // Log coordinates for debugging
+       // console.log(`[POI TITAN] Popup Update: Lat=${pLat} Lng=${pLng} Bounds=${b.south.toFixed(4)},${b.north.toFixed(4)}`);
+
+       if (pLat >= b.south && pLat <= b.north && pLng >= b.west && pLng <= b.east) {
+          const px = ((pLng - b.west) / (b.east - b.west)) * w;
+          const pLatProj = projectY(pLat);
+          const py = ((maxLatProj - pLatProj) / (maxLatProj - minLatProj)) * h;
+          
+          this.activePopup.style.left = `${px}px`;
+          this.activePopup.style.top = `${py - 42}px`;
+       } else {
+          this.hidePopup(); // Hide if anchor moves out of view
+       }
+    }
+
+    // Track existing pins to reuse/diff them
+    const existingPins = new Map();
+    this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => {
+       const id = m.getAttribute('data-poi-id');
+       if (id) existingPins.set(id, m);
+    });
+    
+    const usedPins = new Set();
+
+    this.markerData.forEach((poi, index) => {
       const lat = parseFloat(poi.latitude);
       const lng = parseFloat(poi.longitude);
+      
+      // Basic bounds check
       if (lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east) {
+        const poiId = poi.id || `${poi.name}-${lat}-${lng}`; // Use ID or composite key
+        usedPins.add(poiId);
+
         const x = ((lng - b.west) / (b.east - b.west)) * w;
         const latProj = projectY(lat);
         const y = ((maxLatProj - latProj) / (maxLatProj - minLatProj)) * h;
-        const pin = document.createElement('div');
-        pin.className = 'poi-marker-overlay';
+        
+        let pin = existingPins.get(poiId);
+        
+        // If pin exists, update position (no flicker)
+        if (pin) {
+           pin.style.left = `${x}px`;
+           pin.style.top = `${y}px`;
+        } else {
+           // Create new pin
+           pin = document.createElement('div');
+           pin.className = 'poi-marker-overlay';
+           pin.setAttribute('data-poi-id', poiId);
+           const style = pref.groupStyles[poi.groupName] || {};
+           const color = style.color || pref.accentColor || '#ff0000';
+           const secondaryColor = style.secondaryColor || '#ffffff';
+           const logo = style.logoData;
+           pin.style.cssText = `
+             position: absolute; left: ${x}px; top: ${y}px; width: 32px; height: 32px;
+             background-image: url('${logo || getPinSvg(color, secondaryColor)}');
+             background-size: contain; background-repeat: no-repeat;
+             transform: translate(-50%, -100%); pointer-events: auto; cursor: pointer;
+             filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4)); z-index: 1000;
+             transition: top 0.1s linear, left 0.1s linear; /* Smooth movement */
+           `;
+           pin.onmouseleave = () => { 
+               if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+               // Debounce hide to allow moving to popup
+               this.hoverTimeout = setTimeout(() => { this.hidePopup(); }, 300); 
+           };
+           pin.onclick = (e) => { e.stopPropagation(); window.postMessage({ type: 'POI_CENTER_MAP', lat, lng }, '*'); };
+           this.overlay.appendChild(pin);
+        }
+        
+        // ALWAYS update the hover listener with fresh coordinates (Fixes stale closure bug)
+        // We do this outside the if/else to ensure reused pins get new coordinates
         const style = pref.groupStyles[poi.groupName] || {};
         const color = style.color || pref.accentColor || '#ff0000';
-        const secondaryColor = style.secondaryColor || '#ffffff';
-        const logo = style.logoData;
-        pin.style.cssText = `
-          position: absolute; left: ${x}px; top: ${y}px; width: 32px; height: 32px;
-          background-image: url('${logo || getPinSvg(color, secondaryColor)}');
-          background-size: contain; background-repeat: no-repeat;
-          transform: translate(-50%, -100%); pointer-events: auto; cursor: pointer;
-          filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4)); z-index: 1000;
-        `;
-        pin.onmouseenter = () => { this.hoverTimeout = setTimeout(() => { this.showPopup(poi, x, y, color); }, 100); };
-        pin.onmouseleave = () => { this.hidePopup(); };
-        pin.onclick = (e) => { e.stopPropagation(); window.postMessage({ type: 'POI_CENTER_MAP', lat, lng }, '*'); };
-        this.overlay.appendChild(pin);
+        pin.onmouseenter = () => { 
+            if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+            this.hoverTimeout = setTimeout(() => { this.showPopup(poi, x, y, color); }, 100); 
+        };
       }
     });
+
+    // Remove pins that are no longer in viewport
+    existingPins.forEach((pin, id) => {
+       if (!usedPins.has(id)) pin.remove();
+    });
+
     this.updateDebug();
   }
 }
