@@ -39,13 +39,18 @@
       // Force immediate hijack attempt (crucial for document_start)
       window.poiHijack.apply();
       
-      // Also apply discovery
+      // Also apply discovery (throttled inside run() if maps exist)
       window.poiDiscovery.run();
       
-      // 4. Update Portal from captured instances
+    // 4. Update Portal from captured instances
       for (const map of window.poiHijack.activeMaps) {
         const res = extractBounds(map);
         if (res && res.north) { window.poiPortal.update(res, 'instance-capture'); break; }
+      }
+      
+      // 5. Renderer Check (Retry if needed)
+      if (window.poiRenderer && window.poiRenderer.lastPoiData.length > 0) {
+         window.poiRenderer.update(window.poiRenderer.lastPoiData);
       }
     } catch(e) {
       console.error(PREFIX + 'Main loop failure:', e);
@@ -53,7 +58,21 @@
   }
 
   // Start Orchestration
-  setInterval(loop, 250);
+  // 1000ms interval: Reduced frequency as native markers are persistent and fluid
+  setInterval(loop, 1000); 
+  
+  // Listen for Data from Content Script
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'POI_DATA_UPDATE') {
+       if (window.poiRenderer) {
+          window.poiRenderer.update(event.data.pois);
+          // Signal back success that native renderer is active
+          if (window.poiHijack.activeMaps.size > 0) {
+             window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
+          }
+       }
+    }
+  });
   
   // Force immediate apply on script load
   if (window.poiHijack) window.poiHijack.apply();

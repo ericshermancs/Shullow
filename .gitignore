@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+
+# Opencode-generated files
+clean_profile*/
+screenshot*
+test_*
+node_modules/
+.opencode/
+/.ruff_cache
+.sisyphus
+*.txt
+session-ses*
+*.log
+
+# non-README.md markdowns
+*.md
+!README.md

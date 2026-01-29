@@ -99,6 +99,9 @@
 
         // B. Body/JSON Sniffing
         if (body && typeof body === 'string') {
+          // SAFETY: Limit parsing to reasonable size to prevent main thread blocking
+          if (body.length > 500000) return; // Skip bodies > 500KB
+          
           try {
             const data = JSON.parse(body);
             

@@ -8,15 +8,28 @@ window.poiDiscovery = {
     try {
       const elements = root.querySelectorAll(selector);
       elements.forEach(el => found.push(el));
+      
+      // Optimization: Limit shadow root crawl depth or skip common non-map containers
+      // This is a heavy operation.
       const all = root.querySelectorAll('*');
       for (const s of all) {
-        if (s.shadowRoot) this.findAllInShadow(s.shadowRoot, selector, found);
+        if (s.shadowRoot) {
+           // Skip known non-map custom elements if possible
+           if (s.tagName.includes('ICON') || s.tagName.includes('BUTTON')) continue;
+           this.findAllInShadow(s.shadowRoot, selector, found);
+        }
       }
     } catch(e) {}
     return found;
   },
 
   run() {
+    // IDLE CHECK: If we already have active maps, we don't need to scan aggressively.
+    // Scan only every 10th call (assuming 1s loop = every 10s)
+    if (window.poiHijack.activeMaps.size > 0) {
+       this._idleCounter = (this._idleCounter || 0) + 1;
+       if (this._idleCounter % 10 !== 0) return; 
+    }
     // A. Mapbox Global Registry
     try { 
       if (window.mapboxgl?.getInstances) {
