@@ -283,7 +283,52 @@ class OverlayManager {
              filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4)); z-index: 1000;
              transition: top 0.1s linear, left 0.1s linear; /* Smooth movement */
            `;
+
+           // Allow zooming through pins (pass-through scroll)
+           pin.addEventListener('wheel', (e) => {
+               this.isScrollingOverPin = true;
+               pin.style.pointerEvents = 'none';
+               
+               // Manually re-dispatch the FIRST blocked event to the map layer below
+               // because pointer-events change doesn't affect the current event target immediately
+               try {
+                  const target = document.elementFromPoint(e.clientX, e.clientY);
+                  if (target && target !== pin) {
+                      // Clone the event. Note: 'wheel' event constructor support is good in modern browsers.
+                      const newEvent = new WheelEvent('wheel', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window,
+                          deltaX: e.deltaX,
+                          deltaY: e.deltaY,
+                          deltaZ: e.deltaZ,
+                          deltaMode: e.deltaMode,
+                          clientX: e.clientX,
+                          clientY: e.clientY,
+                          screenX: e.screenX,
+                          screenY: e.screenY,
+                          ctrlKey: e.ctrlKey,
+                          shiftKey: e.shiftKey,
+                          altKey: e.altKey,
+                          metaKey: e.metaKey
+                      });
+                      target.dispatchEvent(newEvent);
+                  }
+               } catch(err) {
+                  // Fallback: next wheel event will work anyway
+               }
+               
+               if (this._pinScrollTimeout) clearTimeout(this._pinScrollTimeout);
+               this._pinScrollTimeout = setTimeout(() => {
+                   pin.style.pointerEvents = 'auto';
+                   this.isScrollingOverPin = false;
+               }, 400);
+           }, { passive: true });
+
            pin.onmouseleave = () => { 
+               // Don't close popup if we are just scrolling through the pin
+               if (this.isScrollingOverPin) return;
+
                if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
                // Debounce hide to allow moving to popup
                this.hoverTimeout = setTimeout(() => { this.hidePopup(); }, 300); 
