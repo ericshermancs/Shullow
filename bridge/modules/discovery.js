@@ -59,10 +59,14 @@ window.poiDiscovery = {
         }
         // Subscribe for real-time updates on move
         if (!store._poiSubscribed && typeof store.subscribe === 'function') {
+          let lastBounds = store.getState()?.map?.viewport?.bounds;
           store.subscribe(() => {
             const ns = store.getState();
-            if (ns?.map?.viewport?.bounds) {
-              window.poiPortal.update(ns.map.viewport.bounds, 'redfin-redux-sub');
+            const newBounds = ns?.map?.viewport?.bounds;
+            // Strict equality check to prevent updates if bounds object hasn't changed
+            if (newBounds && newBounds !== lastBounds) {
+              lastBounds = newBounds;
+              window.poiPortal.update(newBounds, 'redfin-redux-sub');
             }
           });
           store._poiSubscribed = true;
@@ -70,7 +74,8 @@ window.poiDiscovery = {
       }
       
       // B2. Global Bounds Scraper (__map_bounds__)
-      if (window.__map_bounds__) {
+      // Optimization: Only run this fallback if we haven't locked onto a better source
+      if (window.__map_bounds__ && window.poiPortal.lastPriority < 80) {
         const b = window.__map_bounds__;
         const keys = Object.keys(b).filter(k => b[k] && typeof b[k].lo === 'number' && typeof b[k].hi === 'number');
         if (keys.length >= 2) {

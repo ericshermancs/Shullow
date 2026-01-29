@@ -25,6 +25,14 @@ window.poiPortal = {
     const priority = this.PRIORITIES[method] || 30;
     const now = Date.now();
     
+    // STRICTER LOCK: If we have locked onto a high-quality source (>= 80),
+    // ignore any low-quality polling (< 80) PERMANENTLY unless the high-quality source goes silent for > 5 seconds.
+    if (this.lastPriority >= 80 && priority < 80) {
+       if (now - this.lastUpdateTime < 5000) return;
+       // Reset lock if silence for 5s
+       this.lastPriority = 0; 
+    }
+
     // Always allow high-priority updates (e.g. from user interaction or API)
     // Only filter low-priority polling if a high-priority event happened very recently
     if (priority <= 50 && this.lastPriority > 50 && (now - this.lastUpdateTime < 500)) {

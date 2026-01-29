@@ -36,14 +36,17 @@ window.poiHijack = {
            try { update(); } catch(e) {}
         };
         
-        target.on('move', safeUpdate);
+        // Remove continuous events (move, zoom, dataloading, data) to prevent flickering/thrashing
+        // especially when the site is erroring and reloading resources loop.
+        // target.on('move', safeUpdate); 
         target.on('moveend', safeUpdate);
-        target.on('zoom', safeUpdate);
+        // target.on('zoom', safeUpdate);
         target.on('zoomend', safeUpdate);
         
         // Redfin specific: Listen to style load or data load which often happens on pan
-        target.on('dataloading', safeUpdate);
-        target.on('data', safeUpdate);
+        // DISABLED: These fire too frequently during error recovery or resource loading
+        // target.on('dataloading', safeUpdate);
+        // target.on('data', safeUpdate);
         
         instance._poiListener = true; // Mark original instance as processed
       } else if (target.addListener) { // Google Maps

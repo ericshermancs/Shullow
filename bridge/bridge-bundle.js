@@ -25,6 +25,14 @@ window.poiPortal = {
     const priority = this.PRIORITIES[method] || 30;
     const now = Date.now();
     
+    // STRICTER LOCK: If we have locked onto a high-quality source (>= 80),
+    // ignore any low-quality polling (< 80) PERMANENTLY unless the high-quality source goes silent for > 5 seconds.
+    if (this.lastPriority >= 80 && priority < 80) {
+       if (now - this.lastUpdateTime < 5000) return;
+       // Reset lock if silence for 5s
+       this.lastPriority = 0; 
+    }
+
     // Always allow high-priority updates (e.g. from user interaction or API)
     // Only filter low-priority polling if a high-priority event happened very recently
     if (priority <= 50 && this.lastPriority > 50 && (now - this.lastUpdateTime < 500)) {
@@ -109,14 +117,17 @@ window.poiHijack = {
            try { update(); } catch(e) {}
         };
         
-        target.on('move', safeUpdate);
+        // Remove continuous events (move, zoom, dataloading, data) to prevent flickering/thrashing
+        // especially when the site is erroring and reloading resources loop.
+        // target.on('move', safeUpdate); 
         target.on('moveend', safeUpdate);
-        target.on('zoom', safeUpdate);
+        // target.on('zoom', safeUpdate);
         target.on('zoomend', safeUpdate);
         
         // Redfin specific: Listen to style load or data load which often happens on pan
-        target.on('dataloading', safeUpdate);
-        target.on('data', safeUpdate);
+        // DISABLED: These fire too frequently during error recovery or resource loading
+        // target.on('dataloading', safeUpdate);
+        // target.on('data', safeUpdate);
         
         instance._poiListener = true; // Mark original instance as processed
       } else if (target.addListener) { // Google Maps
@@ -504,10 +515,14 @@ window.poiDiscovery = {
         }
         // Subscribe for real-time updates on move
         if (!store._poiSubscribed && typeof store.subscribe === 'function') {
+          let lastBounds = store.getState()?.map?.viewport?.bounds;
           store.subscribe(() => {
             const ns = store.getState();
-            if (ns?.map?.viewport?.bounds) {
-              window.poiPortal.update(ns.map.viewport.bounds, 'redfin-redux-sub');
+            const newBounds = ns?.map?.viewport?.bounds;
+            // Strict equality check to prevent updates if bounds object hasn't changed
+            if (newBounds && newBounds !== lastBounds) {
+              lastBounds = newBounds;
+              window.poiPortal.update(newBounds, 'redfin-redux-sub');
             }
           });
           store._poiSubscribed = true;
@@ -515,7 +530,8 @@ window.poiDiscovery = {
       }
       
       // B2. Global Bounds Scraper (__map_bounds__)
-      if (window.__map_bounds__) {
+      // Optimization: Only run this fallback if we haven't locked onto a better source
+      if (window.__map_bounds__ && window.poiPortal.lastPriority < 80) {
         const b = window.__map_bounds__;
         const keys = Object.keys(b).filter(k => b[k] && typeof b[k].lo === 'number' && typeof b[k].hi === 'number');
         if (keys.length >= 2) {
