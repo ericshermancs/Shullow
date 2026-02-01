@@ -628,198 +628,6 @@ var window = (() => {
     }
   });
 
-  // bridge/modules/sniff.js
-  var require_sniff = __commonJS({
-    "bridge/modules/sniff.js"(exports, module) {
-      var NetworkSnifferManager = class extends ManagerBase {
-        constructor() {
-          super();
-          this.originalFetch = null;
-          this.originalXHROpen = null;
-          this.originalXHRSend = null;
-        }
-        /**
-         * @override
-         * Called during initialization
-         */
-        async onInitialize() {
-          this.installProxies();
-          console.log("POI Bridge: Sniffer initialized");
-        }
-        /**
-         * @override
-         * Cleanup and restore original methods
-         */
-        cleanup() {
-          this.initialized = false;
-          this.log("NetworkSnifferManager cleaned up");
-        }
-        /**
-         * Installs all network proxies
-         */
-        installProxies() {
-          const self = this;
-          this.originalFetch = window.fetch;
-          window.fetch = function(...args) {
-            try {
-              const input = args[0];
-              const init = args[1];
-              let url = "";
-              if (typeof input === "string")
-                url = input;
-              else if (input instanceof URL)
-                url = input.toString();
-              else if (input && typeof input === "object")
-                url = input.url;
-              if (url) {
-                const body = typeof init?.body === "string" ? init.body : null;
-                self.process(url, body);
-              }
-            } catch (e) {
-            }
-            return self.originalFetch.apply(window, args);
-          };
-          this.originalXHROpen = XMLHttpRequest.prototype.open;
-          XMLHttpRequest.prototype.open = function(method, url) {
-            this._poiUrl = url;
-            return self.originalXHROpen.apply(this, arguments);
-          };
-          this.originalXHRSend = XMLHttpRequest.prototype.send;
-          XMLHttpRequest.prototype.send = function(body) {
-            try {
-              if (this._poiUrl)
-                self.process(this._poiUrl, body);
-            } catch (e) {
-            }
-            return self.originalXHRSend.apply(this, arguments);
-          };
-          const wrapHistory = (type) => {
-            const orig = history[type];
-            return function() {
-              const rv = orig.apply(this, arguments);
-              const e = new Event(type);
-              e.arguments = arguments;
-              window.dispatchEvent(e);
-              return rv;
-            };
-          };
-          history.pushState = wrapHistory("pushState");
-          history.replaceState = wrapHistory("replaceState");
-          window.addEventListener("pushState", () => self.process(window.location.href));
-          window.addEventListener("replaceState", () => self.process(window.location.href));
-          window.addEventListener("popstate", () => self.process(window.location.href));
-        }
-        /**
-         * Alias for init() - backwards compatibility
-         */
-        init() {
-          if (!this.initialized) {
-            this.installProxies();
-            this.initialized = true;
-          }
-        }
-        /**
-         * Processes a URL/body for bounds data
-         * NOTE: This only extracts bounds, NOT domain info (per Phase 6.5.3)
-         * @param {string} url - The URL
-         * @param {string} body - Optional request body
-         */
-        process(url, body) {
-          if (!url)
-            return;
-          try {
-            const s = url.toString();
-            const p = [
-              /bounds=([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)/,
-              /sw=([\d.-]+),([\d.-]+)&ne=([\d.-]+),([\d.-]+)/,
-              /viewport=([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)/,
-              /bbox=([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)/,
-              /points=([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)/
-            ];
-            for (const pattern of p) {
-              const m = s.match(pattern);
-              if (m) {
-                const v = m.slice(1, 5).map(parseFloat);
-                const b = this.normalizeBounds(v);
-                if (b) {
-                  window.poiPortal.update(b, "network-url");
-                  return;
-                }
-              }
-            }
-            if (body && typeof body === "string") {
-              if (body.length > 5e5)
-                return;
-              try {
-                const data = JSON.parse(body);
-                const found = this.findBounds(data);
-                if (found)
-                  window.poiPortal.update(found, "network-body");
-              } catch (e) {
-              }
-            }
-          } catch (e) {
-          }
-        }
-        /**
-         * Normalizes an array of 4 values into bounds object
-         * @param {Array} v - Array of 4 coordinate values
-         * @returns {Object|null} Bounds object or null
-         */
-        normalizeBounds(v) {
-          const lats = v.filter((x) => Math.abs(x) < 90);
-          const lngs = v.filter((x) => Math.abs(x) > 60 && Math.abs(x) < 180);
-          if (lats.length >= 2 && lngs.length >= 2) {
-            return {
-              north: Math.max(...lats),
-              south: Math.min(...lats),
-              east: Math.max(...lngs),
-              west: Math.min(...lngs)
-            };
-          }
-          return null;
-        }
-        /**
-         * Recursively searches an object for bounds data
-         * @param {Object} obj - Object to search
-         * @param {number} depth - Current recursion depth
-         * @returns {Object|null} Bounds object or null
-         */
-        findBounds(obj, depth = 0) {
-          if (!obj || depth > 12 || typeof obj !== "object")
-            return null;
-          try {
-            let inner = obj.scms ? JSON.parse(obj.scms) : obj;
-            if (inner.mapCriteria?.boundingBox) {
-              const b = inner.mapCriteria.boundingBox;
-              return { north: b.tl.lt, south: b.br.lt, west: b.tl.ln, east: b.br.ln };
-            }
-            if (obj.viewport && typeof obj.viewport.north === "number")
-              return obj.viewport;
-            if (typeof obj.north === "number" && typeof obj.south === "number" && obj.north !== obj.south)
-              return obj;
-            if (obj.ne && obj.sw && typeof obj.ne.lat === "number")
-              return { north: obj.ne.lat, south: obj.sw.lat, east: obj.ne.lng, west: obj.sw.lng };
-            for (const k in obj) {
-              if (obj[k] && typeof obj[k] === "object") {
-                const r = this.findBounds(obj[k], depth + 1);
-                if (r)
-                  return r;
-              }
-            }
-          } catch (e) {
-          }
-          return null;
-        }
-      };
-      var snifferManager = new NetworkSnifferManager();
-      window.poiSniff = snifferManager;
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = NetworkSnifferManager;
-      }
-    }
-  });
-
   // bridge/modules/portal.js
   var require_portal = __commonJS({
     "bridge/modules/portal.js"(exports, module) {
@@ -1061,6 +869,33 @@ var window = (() => {
         }
         /**
          * @override
+         * Gets the CSS selector for Redfin native markers
+         * @returns {string} CSS selector for Redfin pushpins
+         * @protected
+         */
+        _getNativeMarkerSelector() {
+          return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"]';
+        }
+        /**
+         * @override
+         * Checks if Redfin has already placed a native marker for this POI
+         * @param {Object} poi - POI object
+         * @returns {boolean} True if Redfin native marker exists
+         */
+        _hasSiteNativeMarker(poi) {
+          if (typeof this._hasLoggedRedfinMarker === "undefined") {
+            this._hasLoggedRedfinMarker = false;
+          }
+          const selector = `.Pushpin.homePushpin[data-latitude="${poi.latitude}"][data-longitude="${poi.longitude}"]`;
+          const found = !!document.querySelector(selector);
+          if (found && !this._hasLoggedRedfinMarker) {
+            this.log("Redfin native marker detected");
+            this._hasLoggedRedfinMarker = true;
+          }
+          return found;
+        }
+        /**
+         * @override
          * Detects the Redfin map container
          * @returns {HTMLElement|null} The map container element
          */
@@ -1234,6 +1069,34 @@ var window = (() => {
         constructor(debug = false) {
           super(debug);
           this.siteId = "homes.com";
+        }
+        /**
+         * @override
+         * Gets the CSS selector for Homes.com/Apartments.com native markers
+         * @returns {string} CSS selector for custom markers
+         * @protected
+         */
+        _getNativeMarkerSelector() {
+          return ".custom-marker.gmaps-adv-marker";
+        }
+        /**
+         * @override
+         * Checks if Homes.com has already placed a native marker for this POI
+         * @param {Object} poi - POI object
+         * @returns {boolean} True if Homes.com native marker exists
+         */
+        _hasSiteNativeMarker(poi) {
+          if (typeof this._hasLoggedHomesMarker === "undefined") {
+            this._hasLoggedHomesMarker = false;
+          }
+          const coord = `${poi.latitude},${poi.longitude}`;
+          const selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
+          const found = !!document.querySelector(selector);
+          if (found && !this._hasLoggedHomesMarker) {
+            this.log("Homes.com native marker detected");
+            this._hasLoggedHomesMarker = true;
+          }
+          return found;
         }
         /**
          * Finds elements matching selector within Shadow DOM
@@ -2067,6 +1930,7 @@ var window = (() => {
          * @returns {MapEntry} The registry entry
          */
         register(mapInstance, container = null) {
+          console.log("[OverlayRegistry] register() called for mapInstance:", mapInstance, "container:", container);
           if (this.instanceToId.has(mapInstance)) {
             const existingId = this.instanceToId.get(mapInstance);
             const entry2 = this.entries.get(existingId);
@@ -2078,13 +1942,26 @@ var window = (() => {
           }
           const id = this.generateId();
           const domain = this._extractDomainFromMap(mapInstance, container);
+          console.log("[OverlayRegistry] Extracted domain:", domain);
           let overlay = null;
           if (this.factory) {
             overlay = this.factory.createOverlay(domain);
-          } else if (typeof window.overlayFactory !== "undefined") {
+            console.log("[OverlayRegistry] Created overlay via this.factory:", overlay, "for domain:", domain);
+          } else if (typeof window.overlayFactory !== "undefined" && window.overlayFactory) {
             overlay = window.overlayFactory.createOverlay(domain);
+            console.log("[OverlayRegistry] Created overlay via window.overlayFactory:", overlay, "for domain:", domain);
+            if (!overlay && typeof window.GenericMapOverlay !== "undefined") {
+              overlay = new window.GenericMapOverlay();
+              console.warn("[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:", domain);
+            }
+          } else if (typeof window.GenericMapOverlay !== "undefined") {
+            overlay = new window.GenericMapOverlay();
+            console.warn("[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:", domain);
+          } else {
+            console.warn("[OverlayRegistry] No overlay factory or GenericMapOverlay found for domain:", domain);
           }
           const entry = new MapEntry(id, mapInstance, domain, overlay);
+          console.log("[OverlayRegistry] MapEntry created:", entry);
           this.entries.set(id, entry);
           this.instanceToId.set(mapInstance, id);
           if (mapInstance) {
@@ -2232,14 +2109,47 @@ var window = (() => {
           this.idCounter = 0;
           this.log("Registry cleared");
         }
+        /**
+         * Get debug info about all registered overlays
+         * Useful for debugging map detection issues
+         */
+        getDebugInfo() {
+          const info = [];
+          this.entries.forEach((entry, id) => {
+            info.push({
+              id: entry.id,
+              domain: entry.domain,
+              overlayClass: entry.overlay ? entry.overlay.constructor.name : "none",
+              overlayId: entry.overlay ? entry.overlay.siteId : "none",
+              nativeMarkersInjected: entry.overlay ? entry.overlay._nativeMarkersInjected : "N/A",
+              isActive: entry.isActive,
+              createdAt: new Date(entry.createdAt).toISOString(),
+              lastUpdate: new Date(entry.lastUpdate).toISOString(),
+              poiCount: entry.overlay ? entry.overlay.pois ? entry.overlay.pois.length : 0 : 0
+            });
+          });
+          return info;
+        }
+        /**
+         * Log all overlays info to console
+         */
+        logDebugInfo() {
+          const info = this.getDebugInfo();
+          console.log("[OverlayRegistry] Current overlays:", info);
+          return info;
+        }
       };
       var overlayRegistry = new OverlayRegistry();
       if (typeof module !== "undefined" && module.exports) {
         module.exports = { OverlayRegistry, MapEntry, overlayRegistry };
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.OverlayRegistry = OverlayRegistry;
         window.MapEntry = MapEntry;
         window.overlayRegistry = overlayRegistry;
+        if (window.overlayRegistry) {
+          console.log("[OverlayRegistry] overlayRegistry attached to window:", window.overlayRegistry);
+        }
       }
     }
   });
@@ -2493,7 +2403,7 @@ var window = (() => {
       }
     }
     function loop() {
-      if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal || !window.poiSniff) {
+      if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal) {
         if (attempts < 20) {
           attempts++;
           return;
@@ -2502,9 +2412,9 @@ var window = (() => {
         return;
       }
       initializeRegistry();
-      if (!window.poiSniff.initialized) {
-        window.poiSniff.init();
-        console.log(PREFIX + "Omni-Sniffer v12.10 Active");
+      if (!window.poiBridgeReady) {
+        window.poiBridgeReady = true;
+        console.log(PREFIX + "POI Bridge v7.1 Active (Secure Mode - No Network Sniffing)");
         document.documentElement.setAttribute("data-poi-bridge-status", "ONLINE");
       }
       try {
@@ -2683,7 +2593,6 @@ var window = (() => {
   var import_mapUtilities = __toESM(require_mapUtilities());
   var import_hijack = __toESM(require_hijack());
   var import_discovery = __toESM(require_discovery());
-  var import_sniff = __toESM(require_sniff());
   var import_portal = __toESM(require_portal());
 
   // bridge/modules/renderer.js
@@ -3121,35 +3030,55 @@ var window = (() => {
       return null;
     }
     /**
-     * Checks if a native marker for this POI exists in the DOM
-     * Logs only once per overlay session, not per POI.
-     * Can be overridden by subclasses for site-specific logic
+     * Checks if the extension has already rendered a marker for this POI
+     * Used to prevent duplicate overlay rendering
      * @param {Object} poi - POI object
-     * @returns {boolean} True if native marker exists
+     * @returns {boolean} True if extension marker exists
+     * @protected
      */
-    _hasNativeMarker(poi) {
-      if (typeof this._hasLoggedNativeMarker === "undefined") {
-        this._hasLoggedNativeMarker = false;
-        this._nativeMarkerPreviouslyFound = false;
-      }
-      const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
-      const found = !!document.querySelector(selector);
-      if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
-        this.log("Native marker detected");
-        this._hasLoggedNativeMarker = true;
-      }
-      if (found) {
-        this._nativeMarkerPreviouslyFound = true;
-      }
-      return found;
+    _hasExtensionMarker(poi) {
+      const selector = `[class*="poi-"], [data-poi-id="${MapUtils.getPoiId(poi)}"]`;
+      return !!document.querySelector(selector);
     }
     /**
-     * Filters POIs to exclude those with native markers
+     * Checks if the site has already placed a native marker for this POI
+     * Used to skip rendering if site's own pins are visible
+     * Should be overridden by subclasses for site-specific detection
+     * @param {Object} poi - POI object
+     * @returns {boolean} True if site native marker exists
+     * @protected
+     */
+    _hasSiteNativeMarker(poi) {
+      return false;
+    }
+    /**
+     * Checks if a marker (extension or site) already exists for this POI
+     * Combines both extension and site marker checks
+     * @param {Object} poi - POI object
+     * @returns {boolean} True if any marker exists
+     */
+    _hasNativeMarker(poi) {
+      if (typeof this._hasLoggedSiteMarker === "undefined") {
+        this._hasLoggedSiteMarker = false;
+      }
+      if (this._hasSiteNativeMarker(poi)) {
+        if (!this._hasLoggedSiteMarker) {
+          this.log("Site native marker detected, skipping overlay render");
+          this._hasLoggedSiteMarker = true;
+        }
+        return true;
+      }
+      if (this._hasExtensionMarker(poi)) {
+        return true;
+      }
+      return false;
+    }
+    /**
+     * Filters POIs to exclude those with native markers (site or extension)
      * @param {Array} pois - Array of POI objects
      * @returns {Array} Filtered POIs
      */
     _filterNativePois(pois) {
-      console.log("Filtering native POIs");
       return pois.filter((poi) => !this._hasNativeMarker(poi));
     }
     /**
@@ -3186,12 +3115,15 @@ var window = (() => {
       this.batchOverlay = null;
       this.activeElements = /* @__PURE__ */ new Map();
       this._nativeMarkersInjected = false;
+      this._nativeMarkerPollInterval = null;
       this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
       this._nativeMarkerObserver = null;
       this._startNativeMarkerObserver();
+      this._startNativeMarkerPolling();
     }
     /**
      * Sets up a MutationObserver to watch for native marker insertion and auto-clear overlays
+     * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
      */
     _startNativeMarkerObserver() {
       if (typeof window === "undefined" || typeof document === "undefined")
@@ -3202,7 +3134,8 @@ var window = (() => {
         this.log("MutationObserver callback fired", mutationsList);
         if (this._nativeMarkersInjected)
           return;
-        if (document.querySelector(".poi-native-marker")) {
+        const selector = this._getNativeMarkerSelector();
+        if (selector && document.querySelector(selector)) {
           this._nativeMarkersInjected = true;
           this.log("Native marker detected by MutationObserver, clearing overlay markers");
           this.clear();
@@ -3210,6 +3143,60 @@ var window = (() => {
       };
       this._nativeMarkerObserver = new MutationObserver(callback);
       this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    /**
+     * Gets the CSS selector for native markers on this site
+     * Override in subclass to provide site-specific selectors
+     * @returns {string|null} CSS selector or null if no native markers expected
+     * @protected
+     */
+    _getNativeMarkerSelector() {
+      return null;
+    }
+    /**
+     * Starts periodic polling to check if native markers have appeared
+     * This catches cases where native markers are injected after overlay initialization
+     * (e.g., when debug window is opened, or after user interaction)
+     * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+     * @private
+     */
+    _startNativeMarkerPolling() {
+      if (typeof window === "undefined" || typeof document === "undefined")
+        return;
+      if (this._nativeMarkerPollInterval)
+        return;
+      this.log("Starting native marker polling...");
+      this._nativeMarkerPollInterval = setInterval(() => {
+        try {
+          if (this._nativeMarkersInjected) {
+            this._stopNativeMarkerPolling();
+            return;
+          }
+          const selector = this._getNativeMarkerSelector();
+          if (!selector) {
+            return;
+          }
+          const nativeMarkers = document.querySelectorAll(selector);
+          if (nativeMarkers.length > 0) {
+            this._nativeMarkersInjected = true;
+            this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+            this.clear();
+            this._stopNativeMarkerPolling();
+          }
+        } catch (e) {
+          this.log("Error during native marker polling:", e);
+        }
+      }, 1e3);
+    }
+    /**
+     * Stops the periodic native marker polling
+     * @private
+     */
+    _stopNativeMarkerPolling() {
+      if (this._nativeMarkerPollInterval) {
+        clearInterval(this._nativeMarkerPollInterval);
+        this._nativeMarkerPollInterval = null;
+      }
     }
     /**
      * Disconnects the MutationObserver (call on cleanup)
@@ -3328,7 +3315,7 @@ var window = (() => {
             if (!el) {
               el = self.markerPool.acquire(() => {
                 const div = document.createElement("div");
-                div.className = "poi-native-marker";
+                div.className = "poi-overlay-marker";
                 div.style.cssText = `
                 position: absolute; width: 32px; height: 32px;
                 background-size: contain; background-repeat: no-repeat;
@@ -3403,7 +3390,7 @@ var window = (() => {
      */
     createMarker(poi, map) {
       const el = document.createElement("div");
-      el.className = "poi-native-marker";
+      el.className = "poi-overlay-marker";
       const color = poi.color || "#ff0000";
       const secondaryColor = poi.secondaryColor || "#ffffff";
       const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
@@ -3445,6 +3432,7 @@ var window = (() => {
         this.batchOverlay = null;
       }
       this._stopNativeMarkerObserver();
+      this._stopNativeMarkerPolling();
       super.cleanup();
     }
   };
@@ -3463,6 +3451,95 @@ var window = (() => {
     constructor(debug = false) {
       super(debug);
       this.activeMarkers = /* @__PURE__ */ new Map();
+      this._nativeMarkersInjected = false;
+      this._nativeMarkerObserver = null;
+      this._nativeMarkerPollInterval = null;
+      this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
+      this._startNativeMarkerObserver();
+      this._startNativeMarkerPolling();
+    }
+    /**
+     * Sets up a MutationObserver to watch for native marker insertion and auto-clear overlays
+     * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+     */
+    _startNativeMarkerObserver() {
+      if (typeof window === "undefined" || typeof document === "undefined")
+        return;
+      if (this._nativeMarkerObserver)
+        return;
+      const callback = (mutationsList) => {
+        if (this._nativeMarkersInjected)
+          return;
+        const selector = this._getNativeMarkerSelector();
+        if (selector && document.querySelector(selector)) {
+          this._nativeMarkersInjected = true;
+          this.log("Native marker detected by MutationObserver, clearing overlay markers");
+          this.clear();
+        }
+      };
+      this._nativeMarkerObserver = new MutationObserver(callback);
+      this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    /**
+     * Stops the periodic native marker polling
+     * @private
+     */
+    _stopNativeMarkerPolling() {
+      if (this._nativeMarkerPollInterval) {
+        clearInterval(this._nativeMarkerPollInterval);
+        this._nativeMarkerPollInterval = null;
+      }
+    }
+    /**
+     * Starts periodic polling to check if native markers have appeared
+     * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+     * @private
+     */
+    _startNativeMarkerPolling() {
+      if (typeof window === "undefined" || typeof document === "undefined")
+        return;
+      if (this._nativeMarkerPollInterval)
+        return;
+      this.log("Starting native marker polling...");
+      this._nativeMarkerPollInterval = setInterval(() => {
+        try {
+          if (this._nativeMarkersInjected) {
+            this._stopNativeMarkerPolling();
+            return;
+          }
+          const selector = this._getNativeMarkerSelector();
+          if (!selector) {
+            return;
+          }
+          const nativeMarkers = document.querySelectorAll(selector);
+          if (nativeMarkers.length > 0) {
+            this._nativeMarkersInjected = true;
+            this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+            this.clear();
+            this._stopNativeMarkerPolling();
+          }
+        } catch (e) {
+          this.log("Error during native marker polling:", e);
+        }
+      }, 1e3);
+    }
+    /**
+     * Gets the CSS selector for native markers on this site
+     * Override in subclass to provide site-specific selectors
+     * @returns {string|null} CSS selector or null if no native markers expected
+     * @protected
+     */
+    _getNativeMarkerSelector() {
+      return null;
+    }
+    /**
+     * Disconnects the MutationObserver (call on cleanup)
+     */
+    _stopNativeMarkerObserver() {
+      if (this._nativeMarkerObserver) {
+        this._nativeMarkerObserver.disconnect();
+        this._nativeMarkerObserver = null;
+      }
     }
     /**
      * @override
@@ -3487,6 +3564,16 @@ var window = (() => {
      * @param {Object} mapInstance - The map instance
      */
     renderMarkers(pois, mapInstance) {
+      if (this._nativeMarkersInjected) {
+        this.log("Native markers injected, clearing overlay markers");
+        this.clear();
+        return;
+      }
+      if (typeof window !== "undefined" && window.poiState && window.poiState.nativeMode) {
+        this.log("Native mode active, clearing overlay markers");
+        this.clear();
+        return;
+      }
       const filteredPois = this._filterNativePois(pois);
       if (!mapInstance) {
         this.log("No map instance provided");
@@ -3613,6 +3700,8 @@ var window = (() => {
      */
     cleanup() {
       this.clear();
+      this._stopNativeMarkerObserver();
+      this._stopNativeMarkerPolling();
       super.cleanup();
     }
     /**
@@ -3644,15 +3733,29 @@ var window = (() => {
      * @returns {Array} Filtered POI objects
      */
     _filterNativePois(pois) {
-      return pois.filter((poi) => !this.hasNativeMarker(poi));
+      return pois.filter((poi) => !this._hasNativeMarker(poi));
     }
     /**
-     * Checks if a POI has a native marker
+     * Checks if a POI has a native marker in the DOM
+     * Queries the DOM for markers with any native-marker class variant
      * @param {Object} poi - POI object
      * @returns {boolean} True if the POI has a native marker
      */
-    hasNativeMarker(poi) {
-      return this.activeMarkers.has(`${this._mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`);
+    _hasNativeMarker(poi) {
+      if (typeof this._hasLoggedNativeMarker === "undefined") {
+        this._hasLoggedNativeMarker = false;
+        this._nativeMarkerPreviouslyFound = false;
+      }
+      const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
+      const found = !!document.querySelector(selector);
+      if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
+        this.log("Native marker detected");
+        this._hasLoggedNativeMarker = true;
+      }
+      if (found) {
+        this._nativeMarkerPreviouslyFound = true;
+      }
+      return found;
     }
   };
   if (typeof window !== "undefined") {

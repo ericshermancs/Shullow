@@ -30,6 +30,38 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
 
   /**
    * @override
+   * Gets the CSS selector for Redfin native markers
+   * @returns {string} CSS selector for Redfin pushpins
+   * @protected
+   */
+  _getNativeMarkerSelector() {
+    return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"]';
+  }
+
+  /**
+   * @override
+   * Checks if Redfin has already placed a native marker for this POI
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if Redfin native marker exists
+   */
+  _hasSiteNativeMarker(poi) {
+    if (typeof this._hasLoggedRedfinMarker === 'undefined') {
+      this._hasLoggedRedfinMarker = false;
+    }
+    
+    // Check for Redfin pushpin with matching coordinates
+    const selector = `.Pushpin.homePushpin[data-latitude="${poi.latitude}"][data-longitude="${poi.longitude}"]`;
+    const found = !!document.querySelector(selector);
+    
+    if (found && !this._hasLoggedRedfinMarker) {
+      this.log('Redfin native marker detected');
+      this._hasLoggedRedfinMarker = true;
+    }
+    return found;
+  }
+
+  /**
+   * @override
    * Detects the Redfin map container
    * @returns {HTMLElement|null} The map container element
    */

@@ -21,6 +21,39 @@ class HomesComOverlay extends GoogleMapsOverlayBase {
   }
 
   /**
+   * @override
+   * Gets the CSS selector for Homes.com/Apartments.com native markers
+   * @returns {string} CSS selector for custom markers
+   * @protected
+   */
+  _getNativeMarkerSelector() {
+    return '.custom-marker.gmaps-adv-marker';
+  }
+
+  /**
+   * @override
+   * Checks if Homes.com has already placed a native marker for this POI
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if Homes.com native marker exists
+   */
+  _hasSiteNativeMarker(poi) {
+    if (typeof this._hasLoggedHomesMarker === 'undefined') {
+      this._hasLoggedHomesMarker = false;
+    }
+    
+    // Check for Homes.com custom marker with matching coordinates
+    const coord = `${poi.latitude},${poi.longitude}`;
+    const selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
+    const found = !!document.querySelector(selector);
+    
+    if (found && !this._hasLoggedHomesMarker) {
+      this.log('Homes.com native marker detected');
+      this._hasLoggedHomesMarker = true;
+    }
+    return found;
+  }
+
+  /**
    * Finds elements matching selector within Shadow DOM
    * @param {Node} root - Root node to search from
    * @param {string} selector - CSS selector

@@ -8,7 +8,7 @@
       "features": {
         "shadowDOM": false,
         "redux": false,
-        "networkSniffing": true
+        "networkSniffing": false
       }
     },
     "redfin.com": {
@@ -19,7 +19,7 @@
       "features": {
         "shadowDOM": false,
         "redux": true,
-        "networkSniffing": true,
+        "networkSniffing": false,
         "globalVariables": ["RF_CONTEXT", "__map_bounds__"]
       }
     },
@@ -31,7 +31,7 @@
       "features": {
         "shadowDOM": true,
         "redux": false,
-        "networkSniffing": true
+        "networkSniffing": false
       }
     },
     "onekeymls.com": {
@@ -42,7 +42,7 @@
       "features": {
         "shadowDOM": false,
         "redux": false,
-        "networkSniffing": true
+        "networkSniffing": false
       }
     },
     "realtor.com": {
@@ -53,7 +53,7 @@
       "features": {
         "shadowDOM": true,
         "redux": false,
-        "networkSniffing": true
+        "networkSniffing": false
       }
     }
   },
@@ -64,7 +64,7 @@
     "features": {
       "shadowDOM": true,
       "redux": false,
-      "networkSniffing": true
+      "networkSniffing": false
     }
   },
   "domainAliases": {

@@ -1,13 +1,25 @@
 /**
  * POI Bridge: Sniffer Module
- * Monitors network traffic for coordinate data using non-destructive interception.
  * 
- * Converted to OOP class extending ManagerBase for singleton pattern
- * and initialization lifecycle management.
+ * ⚠️ DEPRECATED & DISABLED
  * 
- * IMPORTANT: This module only sends bounds data to poiPortal.
- * It does NOT modify domain detection or overlay selection.
- * Per Phase 6.5.3, network requests cannot change overlay assignments.
+ * This module was used to monitor network traffic for bounds data,
+ * but is now disabled for security reasons.
+ * 
+ * Rationale:
+ * - Map bounds are already tracked via instance event listeners (hijack.js)
+ * - Instance events provide high-priority data (priority: 100)
+ * - Network sniffing was low-priority (priority: 20) and often overridden anyway
+ * - Network interception adds security concerns without functional benefit
+ * 
+ * Migration:
+ * - All bounds tracking now comes from:
+ *   1. hijack.js: 'idle'/'moveend' event listeners (Google Maps and Mapbox)
+ *   2. RedfinOverlay: Redux store subscription for real-time updates
+ *   3. portal.js: Priority-based bounds locking prevents low-quality data
+ * 
+ * This file is kept for reference but is NOT loaded by entry.js
+
  */
 
 /**

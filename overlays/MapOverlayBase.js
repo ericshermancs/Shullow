@@ -238,39 +238,67 @@ class MapOverlayBase {
   }
 
   /**
-   * Checks if a native marker for this POI exists in the DOM
-   * Logs only once per overlay session, not per POI.
-   * Can be overridden by subclasses for site-specific logic
+   * Checks if the extension has already rendered a marker for this POI
+   * Used to prevent duplicate overlay rendering
    * @param {Object} poi - POI object
-   * @returns {boolean} True if native marker exists
+   * @returns {boolean} True if extension marker exists
+   * @protected
    */
-  _hasNativeMarker(poi) {
-    if (typeof this._hasLoggedNativeMarker === 'undefined') {
-      this._hasLoggedNativeMarker = false;
-      this._nativeMarkerPreviouslyFound = false;
-    }
-    // Only check for EXACT class "poi-native-marker" - overlay markers have suffixes like -generic, -mapbox, -realtor
-    const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
-    const found = !!document.querySelector(selector);
-    // Only log once when native marker is first detected in this overlay session
-    if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
-      this.log('Native marker detected');
-      this._hasLoggedNativeMarker = true;
-    }
-    // Track if native marker was ever found
-    if (found) {
-      this._nativeMarkerPreviouslyFound = true;
-    }
-    return found;
+  _hasExtensionMarker(poi) {
+    // Check for extension's own overlay markers
+    // Classes: poi-overlay-marker, poi-native-marker-mapbox, poi-native-marker-realtor, poi-native-marker-generic
+    const selector = `[class*="poi-"], [data-poi-id="${MapUtils.getPoiId(poi)}"]`;
+    return !!document.querySelector(selector);
   }
 
   /**
-   * Filters POIs to exclude those with native markers
+   * Checks if the site has already placed a native marker for this POI
+   * Used to skip rendering if site's own pins are visible
+   * Should be overridden by subclasses for site-specific detection
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if site native marker exists
+   * @protected
+   */
+  _hasSiteNativeMarker(poi) {
+    // Base class: no site-specific markers to check
+    // Subclasses should override this method for site-specific detection
+    return false;
+  }
+
+  /**
+   * Checks if a marker (extension or site) already exists for this POI
+   * Combines both extension and site marker checks
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if any marker exists
+   */
+  _hasNativeMarker(poi) {
+    if (typeof this._hasLoggedSiteMarker === 'undefined') {
+      this._hasLoggedSiteMarker = false;
+    }
+    
+    // Check if site has its own native marker
+    if (this._hasSiteNativeMarker(poi)) {
+      if (!this._hasLoggedSiteMarker) {
+        this.log('Site native marker detected, skipping overlay render');
+        this._hasLoggedSiteMarker = true;
+      }
+      return true;
+    }
+    
+    // Check if extension already rendered this marker
+    if (this._hasExtensionMarker(poi)) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Filters POIs to exclude those with native markers (site or extension)
    * @param {Array} pois - Array of POI objects
    * @returns {Array} Filtered POIs
    */
   _filterNativePois(pois) {
-    console.log("Filtering native POIs");
     return pois.filter(poi => !this._hasNativeMarker(poi));
   }
 

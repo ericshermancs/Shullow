@@ -30,16 +30,19 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     this.batchOverlay = null;
     this.activeElements = new Map(); // POI ID -> Element
     this._nativeMarkersInjected = false; // Flag to track native marker injection
+    this._nativeMarkerPollInterval = null; // Periodic check for native markers
 
     this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
 
     // --- Automatic native marker detection and overlay clearing ---
     this._nativeMarkerObserver = null;
     this._startNativeMarkerObserver();
+    this._startNativeMarkerPolling();
   }
 
   /**
    * Sets up a MutationObserver to watch for native marker insertion and auto-clear overlays
+   * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
    */
   _startNativeMarkerObserver() {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -47,8 +50,10 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     const callback = (mutationsList) => {
       this.log('MutationObserver callback fired', mutationsList);
       if (this._nativeMarkersInjected) return;
-      // Look for any element with class 'poi-native-marker' (not overlay markers)
-      if (document.querySelector('.poi-native-marker')) {
+      
+      // Use subclass-specific selector for native markers
+      const selector = this._getNativeMarkerSelector();
+      if (selector && document.querySelector(selector)) {
         this._nativeMarkersInjected = true;
         this.log('Native marker detected by MutationObserver, clearing overlay markers');
         this.clear();
@@ -56,6 +61,68 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     };
     this._nativeMarkerObserver = new MutationObserver(callback);
     this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  /**
+   * Gets the CSS selector for native markers on this site
+   * Override in subclass to provide site-specific selectors
+   * @returns {string|null} CSS selector or null if no native markers expected
+   * @protected
+   */
+  _getNativeMarkerSelector() {
+    return null; // Base class doesn't know about native markers
+  }
+
+  /**
+   * Starts periodic polling to check if native markers have appeared
+   * This catches cases where native markers are injected after overlay initialization
+   * (e.g., when debug window is opened, or after user interaction)
+   * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+   * @private
+   */
+  _startNativeMarkerPolling() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerPollInterval) return;
+    
+    this.log('Starting native marker polling...');
+    
+    this._nativeMarkerPollInterval = setInterval(() => {
+      try {
+        // If already using native markers, stop polling
+        if (this._nativeMarkersInjected) {
+          this._stopNativeMarkerPolling();
+          return;
+        }
+        
+        // Use subclass-specific selector for native markers
+        const selector = this._getNativeMarkerSelector();
+        if (!selector) {
+          // No selector defined for this site, nothing to poll for
+          return;
+        }
+        
+        const nativeMarkers = document.querySelectorAll(selector);
+        if (nativeMarkers.length > 0) {
+          this._nativeMarkersInjected = true;
+          this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+          this.clear();
+          this._stopNativeMarkerPolling();
+        }
+      } catch (e) {
+        this.log('Error during native marker polling:', e);
+      }
+    }, 1000); // Poll every 1 second
+  }
+
+  /**
+   * Stops the periodic native marker polling
+   * @private
+   */
+  _stopNativeMarkerPolling() {
+    if (this._nativeMarkerPollInterval) {
+      clearInterval(this._nativeMarkerPollInterval);
+      this._nativeMarkerPollInterval = null;
+    }
   }
 
   /**
@@ -198,7 +265,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
             // Get from pool or create new
             el = self.markerPool.acquire(() => {
               const div = document.createElement('div');
-              div.className = 'poi-native-marker';
+              div.className = 'poi-overlay-marker';
               div.style.cssText = `
                 position: absolute; width: 32px; height: 32px;
                 background-size: contain; background-repeat: no-repeat;
@@ -294,7 +361,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
    */
   createMarker(poi, map) {
     const el = document.createElement('div');
-    el.className = 'poi-native-marker';
+    el.className = 'poi-overlay-marker';
     
     const color = poi.color || '#ff0000';
     const secondaryColor = poi.secondaryColor || '#ffffff';
@@ -348,6 +415,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     }
 
     this._stopNativeMarkerObserver();
+    this._stopNativeMarkerPolling();
 
     super.cleanup();
   }

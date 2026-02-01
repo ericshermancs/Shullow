@@ -40,7 +40,7 @@
 
   function loop() {
     // 1. Dependency Guard
-    if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal || !window.poiSniff) {
+    if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal) {
       if (attempts < 20) {
          attempts++;
          return; 
@@ -52,10 +52,10 @@
     // 1.5. Initialize Registry (Phase 7.1)
     initializeRegistry();
 
-    // 2. Initialize Sniffers (Once)
-    if (!window.poiSniff.initialized) {
-       window.poiSniff.init();
-       console.log(PREFIX + 'Omni-Sniffer v12.10 Active');
+    // 2. Setup Bridge Status
+    if (!window.poiBridgeReady) {
+       window.poiBridgeReady = true;
+       console.log(PREFIX + 'POI Bridge v7.1 Active (Secure Mode - No Network Sniffing)');
        document.documentElement.setAttribute('data-poi-bridge-status', 'ONLINE');
     }
 

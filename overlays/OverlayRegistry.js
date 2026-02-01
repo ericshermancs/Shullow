@@ -218,6 +218,9 @@ class OverlayRegistry {
    * @returns {MapEntry} The registry entry
    */
   register(mapInstance, container = null) {
+    // Log registration attempt
+    console.log('[OverlayRegistry] register() called for mapInstance:', mapInstance, 'container:', container);
+
     // Check if already registered
     if (this.instanceToId.has(mapInstance)) {
       const existingId = this.instanceToId.get(mapInstance);
@@ -228,35 +231,49 @@ class OverlayRegistry {
         return entry;
       }
     }
-    
+
     // Generate unique ID
     const id = this.generateId();
-    
+
     // Extract domain AT THIS MOMENT - this is locked and cannot change
     const domain = this._extractDomainFromMap(mapInstance, container);
-    
-    // Create overlay using factory
+    console.log('[OverlayRegistry] Extracted domain:', domain);
+
+    // Create overlay using factory or fallback
     let overlay = null;
     if (this.factory) {
       overlay = this.factory.createOverlay(domain);
-    } else if (typeof window.overlayFactory !== 'undefined') {
+      console.log('[OverlayRegistry] Created overlay via this.factory:', overlay, 'for domain:', domain);
+    } else if (typeof window.overlayFactory !== 'undefined' && window.overlayFactory) {
       overlay = window.overlayFactory.createOverlay(domain);
+      console.log('[OverlayRegistry] Created overlay via window.overlayFactory:', overlay, 'for domain:', domain);
+      // Fallback if overlay is still null
+      if (!overlay && typeof window.GenericMapOverlay !== 'undefined') {
+        overlay = new window.GenericMapOverlay();
+        console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
+      }
+    } else if (typeof window.GenericMapOverlay !== 'undefined') {
+      overlay = new window.GenericMapOverlay();
+      console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
+    } else {
+      console.warn('[OverlayRegistry] No overlay factory or GenericMapOverlay found for domain:', domain);
     }
-    
+
     // Create entry
     const entry = new MapEntry(id, mapInstance, domain, overlay);
-    
+    console.log('[OverlayRegistry] MapEntry created:', entry);
+
     // Store in registries
     this.entries.set(id, entry);
     this.instanceToId.set(mapInstance, id);
-    
+
     // Tag the map instance with its ID
     if (mapInstance) {
       try {
         mapInstance._poiRegistryId = id;
       } catch (e) {}
     }
-    
+
     this.log(`Registered map: ${id} for domain: ${domain}`);
     
     return entry;
@@ -424,6 +441,37 @@ class OverlayRegistry {
     this.idCounter = 0;
     this.log('Registry cleared');
   }
+
+  /**
+   * Get debug info about all registered overlays
+   * Useful for debugging map detection issues
+   */
+  getDebugInfo() {
+    const info = [];
+    this.entries.forEach((entry, id) => {
+      info.push({
+        id: entry.id,
+        domain: entry.domain,
+        overlayClass: entry.overlay ? entry.overlay.constructor.name : 'none',
+        overlayId: entry.overlay ? entry.overlay.siteId : 'none',
+        nativeMarkersInjected: entry.overlay ? entry.overlay._nativeMarkersInjected : 'N/A',
+        isActive: entry.isActive,
+        createdAt: new Date(entry.createdAt).toISOString(),
+        lastUpdate: new Date(entry.lastUpdate).toISOString(),
+        poiCount: entry.overlay ? (entry.overlay.pois ? entry.overlay.pois.length : 0) : 0
+      });
+    });
+    return info;
+  }
+
+  /**
+   * Log all overlays info to console
+   */
+  logDebugInfo() {
+    const info = this.getDebugInfo();
+    console.log('[OverlayRegistry] Current overlays:', info);
+    return info;
+  }
 }
 
 // Singleton instance
@@ -432,8 +480,13 @@ const overlayRegistry = new OverlayRegistry();
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { OverlayRegistry, MapEntry, overlayRegistry };
-} else if (typeof window !== 'undefined') {
+}
+// Always attach to window if available (for debugging)
+if (typeof window !== 'undefined') {
   window.OverlayRegistry = OverlayRegistry;
   window.MapEntry = MapEntry;
   window.overlayRegistry = overlayRegistry;
+  if (window.overlayRegistry) {
+    console.log('[OverlayRegistry] overlayRegistry attached to window:', window.overlayRegistry);
+  }
 }

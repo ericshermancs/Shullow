@@ -27,6 +27,107 @@ class MapboxOverlayBase extends MapOverlayBase {
   constructor(debug = false) {
     super(debug);
     this.activeMarkers = new Map(); // POI ID -> Mapbox Marker instance
+    this._nativeMarkersInjected = false; // Flag to track native marker injection
+    this._nativeMarkerObserver = null;
+    this._nativeMarkerPollInterval = null; // Periodic check for native markers
+
+    this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
+
+    // --- Automatic native marker detection and overlay clearing ---
+    this._startNativeMarkerObserver();
+    this._startNativeMarkerPolling();
+  }
+
+  /**
+   * Sets up a MutationObserver to watch for native marker insertion and auto-clear overlays
+   * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+   */
+  _startNativeMarkerObserver() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerObserver) return;
+    const callback = (mutationsList) => {
+      if (this._nativeMarkersInjected) return;
+      
+      // Use subclass-specific selector for native markers
+      const selector = this._getNativeMarkerSelector();
+      if (selector && document.querySelector(selector)) {
+        this._nativeMarkersInjected = true;
+        this.log('Native marker detected by MutationObserver, clearing overlay markers');
+        this.clear();
+      }
+    };
+    this._nativeMarkerObserver = new MutationObserver(callback);
+    this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  /**
+   * Stops the periodic native marker polling
+   * @private
+   */
+  _stopNativeMarkerPolling() {
+    if (this._nativeMarkerPollInterval) {
+      clearInterval(this._nativeMarkerPollInterval);
+      this._nativeMarkerPollInterval = null;
+    }
+  }
+
+  /**
+   * Starts periodic polling to check if native markers have appeared
+   * Subclasses should override _getNativeMarkerSelector() to provide site-specific selectors
+   * @private
+   */
+  _startNativeMarkerPolling() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerPollInterval) return;
+    
+    this.log('Starting native marker polling...');
+    
+    this._nativeMarkerPollInterval = setInterval(() => {
+      try {
+        // If already using native markers, stop polling
+        if (this._nativeMarkersInjected) {
+          this._stopNativeMarkerPolling();
+          return;
+        }
+        
+        // Use subclass-specific selector for native markers
+        const selector = this._getNativeMarkerSelector();
+        if (!selector) {
+          // No selector defined for this site, nothing to poll for
+          return;
+        }
+        
+        const nativeMarkers = document.querySelectorAll(selector);
+        if (nativeMarkers.length > 0) {
+          this._nativeMarkersInjected = true;
+          this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+          this.clear();
+          this._stopNativeMarkerPolling();
+        }
+      } catch (e) {
+        this.log('Error during native marker polling:', e);
+      }
+    }, 1000); // Poll every 1 second
+  }
+
+  /**
+   * Gets the CSS selector for native markers on this site
+   * Override in subclass to provide site-specific selectors
+   * @returns {string|null} CSS selector or null if no native markers expected
+   * @protected
+   */
+  _getNativeMarkerSelector() {
+    return null; // Base class doesn't know about native markers
+  }
+
+  /**
+   * Disconnects the MutationObserver (call on cleanup)
+   */
+  _stopNativeMarkerObserver() {
+    if (this._nativeMarkerObserver) {
+      this._nativeMarkerObserver.disconnect();
+      this._nativeMarkerObserver = null;
+    }
   }
 
   /**
@@ -54,6 +155,20 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    // If native markers have been injected, proactively clear overlays
+    if (this._nativeMarkersInjected) {
+      this.log('Native markers injected, clearing overlay markers');
+      this.clear();
+      return;
+    }
+
+    // Check if native mode is active via state
+    if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
+      this.log('Native mode active, clearing overlay markers');
+      this.clear();
+      return;
+    }
+
     const filteredPois = this._filterNativePois(pois);
 
     if (!mapInstance) {
@@ -217,6 +332,8 @@ class MapboxOverlayBase extends MapOverlayBase {
    */
   cleanup() {
     this.clear();
+    this._stopNativeMarkerObserver();
+    this._stopNativeMarkerPolling();
     super.cleanup();
   }
 
@@ -251,16 +368,35 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @returns {Array} Filtered POI objects
    */
   _filterNativePois(pois) {
-    return pois.filter(poi => !this.hasNativeMarker(poi));
+    return pois.filter(poi => !this._hasNativeMarker(poi));
   }
 
   /**
-   * Checks if a POI has a native marker
+   * Checks if a POI has a native marker in the DOM
+   * Queries the DOM for markers with any native-marker class variant
    * @param {Object} poi - POI object
    * @returns {boolean} True if the POI has a native marker
    */
-  hasNativeMarker(poi) {
-    return this.activeMarkers.has(`${this._mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`);
+  _hasNativeMarker(poi) {
+    if (typeof this._hasLoggedNativeMarker === 'undefined') {
+      this._hasLoggedNativeMarker = false;
+      this._nativeMarkerPreviouslyFound = false;
+    }
+
+    // Check for EXACT class "poi-native-marker" - only Google Maps batch overlay creates this
+    const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
+    const found = !!document.querySelector(selector);
+
+    // Only log once when native marker is first detected
+    if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
+      this.log('Native marker detected');
+      this._hasLoggedNativeMarker = true;
+    }
+    // Track if native marker was ever found
+    if (found) {
+      this._nativeMarkerPreviouslyFound = true;
+    }
+    return found;
   }
 }
 
