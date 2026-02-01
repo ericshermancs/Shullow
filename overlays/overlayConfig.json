@@ -1,0 +1,77 @@
+{
+  "sites": {
+    "zillow.com": {
+      "overlay": "ZillowOverlay",
+      "mapType": "mapbox",
+      "priority": 100,
+      "selectors": [".mapboxgl-map"],
+      "features": {
+        "shadowDOM": false,
+        "redux": false,
+        "networkSniffing": true
+      }
+    },
+    "redfin.com": {
+      "overlay": "RedfinOverlay",
+      "mapType": "google",
+      "priority": 100,
+      "selectors": [".gm-style", "[data-rf-test-id=\"map\"]"],
+      "features": {
+        "shadowDOM": false,
+        "redux": true,
+        "networkSniffing": true,
+        "globalVariables": ["RF_CONTEXT", "__map_bounds__"]
+      }
+    },
+    "homes.com": {
+      "overlay": "HomesComOverlay",
+      "mapType": "google",
+      "priority": 100,
+      "selectors": ["gmp-map", ".gm-style"],
+      "features": {
+        "shadowDOM": true,
+        "redux": false,
+        "networkSniffing": true
+      }
+    },
+    "onekeymls.com": {
+      "overlay": "OneKeyOverlay",
+      "mapType": "mapbox",
+      "priority": 100,
+      "selectors": [".mapboxgl-map"],
+      "features": {
+        "shadowDOM": false,
+        "redux": false,
+        "networkSniffing": true
+      }
+    },
+    "realtor.com": {
+      "overlay": "RealtorOverlay",
+      "mapType": "auto",
+      "priority": 100,
+      "selectors": [".mapboxgl-map", ".gm-style", "gmp-map"],
+      "features": {
+        "shadowDOM": true,
+        "redux": false,
+        "networkSniffing": true
+      }
+    }
+  },
+  "defaults": {
+    "overlay": "GenericMapOverlay",
+    "mapType": "auto",
+    "priority": 1,
+    "features": {
+      "shadowDOM": true,
+      "redux": false,
+      "networkSniffing": true
+    }
+  },
+  "domainAliases": {
+    "www.zillow.com": "zillow.com",
+    "www.redfin.com": "redfin.com",
+    "www.homes.com": "homes.com",
+    "www.onekeymls.com": "onekeymls.com",
+    "www.realtor.com": "realtor.com"
+  }
+}

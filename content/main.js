@@ -1,10 +1,14 @@
 /**
  * POI Injector Main Entry
  * Orchestrates the lifecycle of the extension on the page.
+ * 
+ * Updated for Phase 7.2: Uses POIStateManager class
  */
 (function() {
   console.log('POI Main: Content script loaded and executing.');
-  const state = window.poiState;
+  
+  // Phase 7.2: Use POIStateManager instance (either from window or create new)
+  const state = window.poiState || (window.poiState = new POIStateManager());
 
   // Stability Loop: Monitors for map container presence/change
   setInterval(() => {
@@ -41,8 +45,15 @@
      console.error('POI Main: Failed to inject bridge scripts', e);
   }
 
-  // Initialize
-  state.initializeState().then(() => {
-    state.refresh();
-  });
+  // Initialize - use class method if available
+  if (typeof state.initializeState === 'function') {
+    state.initializeState().then(() => {
+      state.refresh();
+    });
+  } else if (typeof state.initialize === 'function') {
+    // ManagerBase pattern
+    state.initialize().then(() => {
+      state.refresh();
+    });
+  }
 })();

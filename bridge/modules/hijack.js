@@ -1,9 +1,52 @@
 /**
  * POI Bridge: Hijack Module
  * Captures map instances via constructor interception.
+ * 
+ * Converted to OOP class extending ManagerBase for singleton pattern
+ * and initialization lifecycle management.
  */
-window.poiHijack = {
-  activeMaps: new Set(),
+
+/**
+ * MapHijackManager - Captures and manages map instances
+ * 
+ * Features:
+ * - Intercepts Google Maps and Mapbox constructors
+ * - Attaches event listeners for bounds updates
+ * - Maintains a Set of active map instances
+ * - Provides backdoor capture via prototype hijacking
+ */
+class MapHijackManager extends ManagerBase {
+  constructor() {
+    super();
+    this.activeMaps = new Set();
+    this.originalConstructors = {};
+  }
+
+  /**
+   * @override
+   * Called during initialization
+   */
+  async onInitialize() {
+    this.interceptConstructors();
+    this.log('MapHijackManager initialized');
+  }
+
+  /**
+   * @override
+   * Cleanup and restore original constructors
+   */
+  cleanup() {
+    // Note: We don't restore constructors as it could break the page
+    // Just clear our state
+    this.activeMaps.clear();
+    this.initialized = false;
+    this.log('MapHijackManager cleaned up');
+  }
+
+  /**
+   * Attaches event listeners to a captured map instance
+   * @param {Object} instance - The map instance
+   */
   attachListeners(instance) {
     if (!instance || instance._poiListener) return;
     console.log('[POI TITAN] Attaching listeners to captured instance');
@@ -70,9 +113,21 @@ window.poiHijack = {
     } catch(e) {
        console.error('[POI TITAN] Failed to attach listeners', e);
     }
-  },
+  }
 
-  apply() {
+  /**
+   * Gets all active map instances as an array
+   * @returns {Array} Array of active map instances
+   */
+  getActiveMaps() {
+    return Array.from(this.activeMaps);
+  }
+
+  /**
+   * Intercepts map constructors (main initialization logic)
+   * Previously the apply() method
+   */
+  interceptConstructors() {
     const self = this;
     
     // TRAP: Google Maps (window.google)
@@ -129,7 +184,6 @@ window.poiHijack = {
     try {
       if (window.mapboxgl?.Map && !window.mapboxgl.Map._isHijacked) {
         const Original = window.mapboxgl.Map;
-        const self = this;
         function HijackedMap(...args) {
           const instance = new Original(...args);
           self.activeMaps.add(instance);
@@ -142,13 +196,17 @@ window.poiHijack = {
         window.mapboxgl.Map = HijackedMap;
       }
     } catch(e) {}
-  },
+  }
 
+  /**
+   * Hijacks Google Maps constructor and prototype methods
+   * @param {Object} mapsObj - The google.maps object
+   */
   hijackGoogle(mapsObj) {
-     try {
+    const self = this;
+    try {
        if (mapsObj.Map && !mapsObj.Map._isHijacked) {
          const Original = mapsObj.Map;
-         const self = this;
          function HijackedMap(...args) {
            if (!new.target) return new HijackedMap(...args);
            const instance = new Original(...args);
@@ -190,4 +248,21 @@ window.poiHijack = {
        }
      } catch(e) {}
   }
-};
+
+  /**
+   * Public method to trigger constructor interception
+   * (maintains backwards compatibility with existing code)
+   */
+  apply() {
+    this.interceptConstructors();
+  }
+}
+
+// Create singleton instance and expose on window for backwards compatibility
+const hijackManager = new MapHijackManager();
+window.poiHijack = hijackManager;
+
+// Export for different module systems
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = MapHijackManager;
+}

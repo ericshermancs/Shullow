@@ -1,6 +1,22 @@
 /**
  * POI Bridge: Renderer Module
  * Handles injecting native map markers into hijacked map instances.
+ * 
+ * @deprecated Phase 7.3 - This module is deprecated.
+ * Rendering is now handled by site-specific overlay classes in the overlays/ folder:
+ * - ZillowOverlay.js
+ * - RedfinOverlay.js
+ * - HomesComOverlay.js
+ * - OneKeyOverlay.js
+ * - RealtorOverlay.js
+ * - GenericMapOverlay.js
+ * 
+ * These overlays are managed by OverlayRegistry and instantiated by OverlayFactory.
+ * This file is kept for backwards compatibility only and will be removed in a future version.
+ * 
+ * Migration Path:
+ * 1. bridge/main.js now routes POI_DATA_UPDATE to overlayRegistry-based overlays first
+ * 2. This renderer is only used as a fallback when the registry is not available
  */
 window.poiRenderer = {
   activeMarkers: new Map(), // Map<id, NativeMarker>

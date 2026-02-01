@@ -1,23 +1,144 @@
 /**
  * POI Bridge: Portal Module
  * Handles cross-world communication and attribute mirroring.
+ * 
+ * Converted to OOP class extending ManagerBase for singleton pattern
+ * and initialization lifecycle management.
  */
-window.poiPortal = {
-  lastBounds: null,
-  lastUpdateTime: 0,
-  lastPriority: 0,
 
-  PRIORITIES: {
-    'instance-event': 100,      // Highest: Direct user interaction
-    'redfin-redux-sub': 90,     // High: Real-time subscription
-    'redfin-api': 85,           // High: API response is very fresh
-    'instance-capture': 80,     // Medium: Extracted from active map instance
-    'redfin-redux': 50,         // Low: Polled state (might be slightly stale)
-    'redfin-global': 40,        // Lower: Polled global variable (often stale)
-    'network-url': 20,          // Lowest: One-off network sniff
-    'network-body': 20
-  },
+/**
+ * PortalManager - Cross-world communication manager
+ * 
+ * Features:
+ * - Bounds update with priority system
+ * - DOM attribute mirroring for isolated world access
+ * - postMessage for content script communication
+ */
+class PortalManager extends ManagerBase {
+  constructor() {
+    super();
+    this.lastBounds = null;
+    this.lastUpdateTime = 0;
+    this.lastPriority = 0;
+    this.messageHandlers = new Map();
+    
+    // Priority levels for different data sources
+    this.PRIORITIES = {
+      'instance-event': 100,      // Highest: Direct user interaction
+      'redfin-redux-sub': 90,     // High: Real-time subscription
+      'redfin-api': 85,           // High: API response is very fresh
+      'instance-capture': 80,     // Medium: Extracted from active map instance
+      'redfin-redux': 50,         // Low: Polled state (might be slightly stale)
+      'redfin-global': 40,        // Lower: Polled global variable (often stale)
+      'network-url': 20,          // Lowest: One-off network sniff
+      'network-body': 20
+    };
+  }
 
+  /**
+   * @override
+   * Called during initialization
+   */
+  async onInitialize() {
+    this.setupMessageListeners();
+    this.log('PortalManager initialized');
+  }
+
+  /**
+   * @override
+   * Cleanup resources
+   */
+  cleanup() {
+    this.messageHandlers.clear();
+    this.initialized = false;
+    this.log('PortalManager cleaned up');
+  }
+
+  /**
+   * Sets up message listeners
+   * @private
+   */
+  setupMessageListeners() {
+    // Can be extended by subclasses or at runtime
+  }
+
+  /**
+   * Registers a message handler
+   * @param {string} type - Message type
+   * @param {Function} handler - Handler function
+   */
+  registerHandler(type, handler) {
+    this.messageHandlers.set(type, handler);
+  }
+
+  /**
+   * Extracts bounds from a map instance
+   * @param {Object} map - Map instance
+   * @returns {Object|null} Bounds object
+   */
+  extractBounds(map) {
+    try {
+      const b = map.getBounds();
+      if (!b) return null;
+      
+      // Google Maps format
+      if (b.getNorthEast) {
+        return {
+          north: b.getNorthEast().lat(),
+          south: b.getSouthWest().lat(),
+          east: b.getNorthEast().lng(),
+          west: b.getSouthWest().lng()
+        };
+      }
+      
+      // Mapbox format
+      if (b.getNorth) {
+        return {
+          north: b.getNorth(),
+          south: b.getSouth(),
+          east: b.getEast(),
+          west: b.getWest()
+        };
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  /**
+   * Filters POIs by priority within given bounds
+   * @param {Array} pois - Array of POIs
+   * @param {Object} bounds - Bounds to filter by
+   * @returns {Array} Filtered POIs
+   */
+  filterByPriority(pois, bounds) {
+    if (!bounds || !pois) return pois;
+    
+    return pois.filter(poi => {
+      const lat = parseFloat(poi.latitude);
+      const lng = parseFloat(poi.longitude);
+      return (
+        lat >= bounds.south &&
+        lat <= bounds.north &&
+        lng >= bounds.west &&
+        lng <= bounds.east
+      );
+    });
+  }
+
+  /**
+   * Sends a message to the content script
+   * @param {string} type - Message type
+   * @param {Object} data - Message data
+   */
+  notifyContentScript(type, data) {
+    window.postMessage({ type, ...data }, '*');
+  }
+
+  /**
+   * Updates bounds with priority checking
+   * @param {Object} bounds - Bounds object
+   * @param {string} method - Source method name
+   */
   update(bounds, method) {
     if (!bounds || typeof bounds.north !== 'number' || isNaN(bounds.north)) return;
     
@@ -59,7 +180,6 @@ window.poiPortal = {
     this.lastBounds = json;
 
     const timestamp = now.toString();
-    // ... rest of function
 
     // Mirror to DOM for Isolated World access
     document.documentElement.setAttribute('data-poi-bounds', json);
@@ -78,4 +198,13 @@ window.poiPortal = {
     window.postMessage(payload, '*');
     if (window.self !== window.top) window.parent.postMessage(payload, '*');
   }
-};
+}
+
+// Create singleton instance and expose on window for backwards compatibility
+const portalManager = new PortalManager();
+window.poiPortal = portalManager;
+
+// Export for different module systems
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = PortalManager;
+}
