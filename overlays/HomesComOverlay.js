@@ -42,9 +42,33 @@ class HomesComOverlay extends GoogleMapsOverlayBase {
     }
     
     // Check for Homes.com custom marker with matching coordinates
-    const coord = `${poi.latitude},${poi.longitude}`;
-    const selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
-    const found = !!document.querySelector(selector);
+    const lat = String(poi.latitude).trim();
+    const lng = String(poi.longitude).trim();
+    const coord = `${lat},${lng}`;
+    
+    // Query for exact match first
+    let selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
+    let found = !!document.querySelector(selector);
+    
+    // If exact match fails, try with flexible matching
+    // Get all custom markers and check their data-cuscor attributes
+    if (!found) {
+      const markers = document.querySelectorAll('.custom-marker.gmaps-adv-marker');
+      for (const marker of markers) {
+        const cuscor = marker.getAttribute('data-cuscor');
+        if (cuscor) {
+          const [markerLat, markerLng] = cuscor.split(',').map(s => parseFloat(s.trim()));
+          const latDiff = Math.abs(parseFloat(lat) - markerLat);
+          const lngDiff = Math.abs(parseFloat(lng) - markerLng);
+          
+          // Allow 0.00001 degrees tolerance (~1 meter)
+          if (latDiff < 0.00001 && lngDiff < 0.00001) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
     
     if (found && !this._hasLoggedHomesMarker) {
       this.log('Homes.com native marker detected');

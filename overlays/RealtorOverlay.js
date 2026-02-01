@@ -26,6 +26,106 @@ class RealtorOverlay extends MapOverlayBase {
     // For Google rendering
     this.markerPool = new MarkerPool();
     this.activeElements = new Map();
+    
+    // Native marker detection infrastructure
+    this._nativeMarkersInjected = false;
+    this._nativeMarkerObserver = null;
+    this._nativeMarkerPollInterval = null;
+    
+    // Start native marker detection
+    this._startNativeMarkerObserver();
+    this._startNativeMarkerPolling();
+  }
+
+  /**
+   * Gets the CSS selector for native markers
+   * @returns {string} CSS selector for extension-injected native markers
+   * @protected
+   */
+  _getNativeMarkerSelector() {
+    return '.poi-native-marker, .poi-native-marker-mapbox, .poi-native-marker-realtor';
+  }
+
+  /**
+   * Sets up a MutationObserver to watch for native marker insertion
+   * @private
+   */
+  _startNativeMarkerObserver() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerObserver) return;
+    
+    const callback = (mutationsList) => {
+      if (this._nativeMarkersInjected) return;
+      
+      const selector = this._getNativeMarkerSelector();
+      if (selector && document.querySelector(selector)) {
+        this._nativeMarkersInjected = true;
+        this.log('Native marker detected by MutationObserver, clearing overlay markers');
+        this.clear();
+      }
+    };
+    
+    this._nativeMarkerObserver = new MutationObserver(callback);
+    this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  /**
+   * Stops the MutationObserver
+   * @private
+   */
+  _stopNativeMarkerObserver() {
+    if (this._nativeMarkerObserver) {
+      this._nativeMarkerObserver.disconnect();
+      this._nativeMarkerObserver = null;
+    }
+  }
+
+  /**
+   * Starts periodic polling to check if native markers have appeared
+   * @private
+   */
+  _startNativeMarkerPolling() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerPollInterval) return;
+    
+    this.log('Starting native marker polling (250ms)...');
+    let lastDetectedCount = 0;
+    
+    this._nativeMarkerPollInterval = setInterval(() => {
+      try {
+        if (this._nativeMarkersInjected) {
+          this._stopNativeMarkerPolling();
+          return;
+        }
+        
+        const selector = this._getNativeMarkerSelector();
+        if (!selector) return;
+        
+        const nativeMarkers = document.querySelectorAll(selector);
+        const count = nativeMarkers.length;
+        
+        if (count > 0 && lastDetectedCount === 0) {
+          this._nativeMarkersInjected = true;
+          this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
+          this.clear();
+          this._stopNativeMarkerPolling();
+        }
+        lastDetectedCount = count;
+      } catch (e) {
+        this.log('Error during native marker polling:', e);
+      }
+    }, 250);
+  }
+
+  /**
+   * Stops the periodic polling
+   * @private
+   */
+  _stopNativeMarkerPolling() {
+    if (this._nativeMarkerPollInterval) {
+      clearInterval(this._nativeMarkerPollInterval);
+      this._nativeMarkerPollInterval = null;
+    }
   }
 
   /**
@@ -136,6 +236,33 @@ class RealtorOverlay extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    // CRITICAL: Check native marker flag FIRST before any other logic
+    if (this._nativeMarkersInjected) {
+      this.log('Native markers injected (flag set), skipping overlay render');
+      return;
+    }
+    
+    // Actively check for native markers BEFORE rendering
+    if (pois && pois.length > 0) {
+      const selector = this._getNativeMarkerSelector();
+      if (selector) {
+        const nativeMarkers = document.querySelectorAll(selector);
+        if (nativeMarkers.length > 0) {
+          this._nativeMarkersInjected = true;
+          this.log('Native markers detected at render time, clearing overlay');
+          this.clear();
+          return;
+        }
+      }
+    }
+
+    // Check if native mode is active via global state
+    if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
+      this.log('Native mode active, clearing overlay markers');
+      this.clear();
+      return;
+    }
+
     if (!mapInstance) {
       this.log('No map instance provided');
       return;
@@ -314,6 +441,8 @@ class RealtorOverlay extends MapOverlayBase {
    * Cleanup resources
    */
   cleanup() {
+    this._stopNativeMarkerPolling();
+    this._stopNativeMarkerObserver();
     this.clear();
     this.markerPool.clear();
     this.detectedMapType = null;

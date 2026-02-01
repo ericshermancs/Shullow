@@ -81,6 +81,29 @@
         }
       }
       
+      // 4.5. PRE-RENDER CHECK: Before rendering overlays, check if native markers are available
+      // This ensures we switch to native pins automatically as soon as they appear
+      if (window.overlayRegistry) {
+        const activeEntries = window.overlayRegistry.getActiveEntries();
+        for (const entry of activeEntries) {
+          if (entry.overlay) {
+            // Trigger native marker detection check with count verification
+            const selector = entry.overlay._getNativeMarkerSelector?.();
+            if (selector) {
+              const nativeMarkers = document.querySelectorAll(selector);
+              if (nativeMarkers.length > 0) {
+                // Native markers detected! Set flag and clear overlay
+                if (!entry.overlay._nativeMarkersInjected) {
+                  entry.overlay._nativeMarkersInjected = true;
+                  console.log(PREFIX + `Native markers detected (pre-render check: ${nativeMarkers.length} found), clearing overlay`);
+                  entry.overlay.clear();
+                }
+              }
+            }
+          }
+        }
+      }
+      
       // 5. Renderer Check - Use registry-based overlays first, fallback to legacy renderer
       if (window.overlayRegistry) {
         const activeEntries = window.overlayRegistry.getActiveEntries();
@@ -100,8 +123,8 @@
   }
 
   // Start Orchestration
-  // 1000ms interval: Reduced frequency as native markers are persistent and fluid
-  setInterval(loop, 1000); 
+  // 500ms interval: Fast enough to catch native marker injection within ~500ms window
+  setInterval(loop, 500); 
   
   // Periodic registry cleanup (every 5 minutes)
   setInterval(() => {
@@ -113,13 +136,26 @@
   // Listen for Data from Content Script
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'POI_DATA_UPDATE') {
+       let nativeRenderSuccess = false;
+       
        // Phase 7.1: Route to registry-based overlays first
        if (window.overlayRegistry) {
           const entries = window.overlayRegistry.getActiveEntries();
           for (const entry of entries) {
-            if (entry.overlay) {
+            if (entry.overlay && entry.mapInstance) {
               entry.overlay.renderMarkers(event.data.pois, entry.mapInstance);
+              // If we have active markers after render, native mode is working
+              const hasActiveMarkers = 
+                (entry.overlay.activeMarkers && entry.overlay.activeMarkers.size > 0) ||
+                (entry.overlay.activeElements && entry.overlay.activeElements.size > 0);
+              if (hasActiveMarkers) {
+                nativeRenderSuccess = true;
+              }
             }
+          }
+          // Signal native mode active if we successfully rendered native markers
+          if (nativeRenderSuccess) {
+            window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
           }
        }
        

@@ -50,8 +50,35 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
     }
     
     // Check for Redfin pushpin with matching coordinates
-    const selector = `.Pushpin.homePushpin[data-latitude="${poi.latitude}"][data-longitude="${poi.longitude}"]`;
-    const found = !!document.querySelector(selector);
+    // Try exact match first
+    const lat = String(poi.latitude).trim();
+    const lng = String(poi.longitude).trim();
+    
+    // Query for exact match
+    let selector = `.Pushpin.homePushpin[data-latitude="${lat}"][data-longitude="${lng}"]`;
+    let found = !!document.querySelector(selector);
+    
+    // If exact match fails, try with more flexible matching
+    // Get all Redfin pushpins and check their data attributes
+    if (!found) {
+      const pushpins = document.querySelectorAll('.Pushpin.homePushpin');
+      for (const pin of pushpins) {
+        const pinLat = pin.getAttribute('data-latitude');
+        const pinLng = pin.getAttribute('data-longitude');
+        
+        // Compare with tolerance for floating point differences
+        if (pinLat && pinLng) {
+          const latDiff = Math.abs(parseFloat(lat) - parseFloat(pinLat));
+          const lngDiff = Math.abs(parseFloat(lng) - parseFloat(pinLng));
+          
+          // Allow 0.00001 degrees tolerance (~1 meter)
+          if (latDiff < 0.00001 && lngDiff < 0.00001) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
     
     if (found && !this._hasLoggedRedfinMarker) {
       this.log('Redfin native marker detected');

@@ -80,7 +80,10 @@ class MapboxOverlayBase extends MapOverlayBase {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (this._nativeMarkerPollInterval) return;
     
-    this.log('Starting native marker polling...');
+    this.log('Starting native marker polling (250ms)...');
+    
+    // Keep track of detected markers count to avoid redundant clears
+    let lastDetectedCount = 0;
     
     this._nativeMarkerPollInterval = setInterval(() => {
       try {
@@ -93,31 +96,38 @@ class MapboxOverlayBase extends MapOverlayBase {
         // Use subclass-specific selector for native markers
         const selector = this._getNativeMarkerSelector();
         if (!selector) {
-          // No selector defined for this site, nothing to poll for
           return;
         }
         
         const nativeMarkers = document.querySelectorAll(selector);
-        if (nativeMarkers.length > 0) {
+        const count = nativeMarkers.length;
+        
+        // React if native markers appeared (count changed from 0 to >0)
+        if (count > 0 && lastDetectedCount === 0) {
           this._nativeMarkersInjected = true;
-          this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+          this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
           this.clear();
           this._stopNativeMarkerPolling();
         }
+        lastDetectedCount = count;
       } catch (e) {
         this.log('Error during native marker polling:', e);
       }
-    }, 1000); // Poll every 1 second
+    }, 250); // Poll every 250ms for faster detection
   }
 
   /**
    * Gets the CSS selector for native markers on this site
-   * Override in subclass to provide site-specific selectors
+   * Override in subclass to provide site-specific selectors (e.g., site's own pins)
+   * Base class returns the extension's native marker class for automatic switching
    * @returns {string|null} CSS selector or null if no native markers expected
    * @protected
    */
   _getNativeMarkerSelector() {
-    return null; // Base class doesn't know about native markers
+    // Return selector for extension-injected native markers
+    // This enables automatic switching from overlay to native pins
+    // Subclasses can override to add site-specific selectors
+    return '.poi-native-marker-mapbox, .poi-native-marker';
   }
 
   /**
@@ -155,11 +165,26 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
-    // If native markers have been injected, proactively clear overlays
+    // CRITICAL: Check native marker flag FIRST before any other logic
+    // This prevents re-rendering after native markers are detected
     if (this._nativeMarkersInjected) {
-      this.log('Native markers injected, clearing overlay markers');
-      this.clear();
+      this.log('Native markers injected (flag set), skipping overlay render');
       return;
+    }
+    
+    // Actively check for site native markers BEFORE rendering
+    // This ensures we detect them even if polling hasn't run yet
+    if (pois && pois.length > 0) {
+      const selector = this._getNativeMarkerSelector();
+      if (selector) {
+        const nativeMarkers = document.querySelectorAll(selector);
+        if (nativeMarkers.length > 0) {
+          this._nativeMarkersInjected = true;
+          this.log('Site native markers detected at render time, clearing overlay');
+          this.clear();
+          return;
+        }
+      }
     }
 
     // Check if native mode is active via state

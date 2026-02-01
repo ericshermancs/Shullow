@@ -886,8 +886,25 @@ var window = (() => {
           if (typeof this._hasLoggedRedfinMarker === "undefined") {
             this._hasLoggedRedfinMarker = false;
           }
-          const selector = `.Pushpin.homePushpin[data-latitude="${poi.latitude}"][data-longitude="${poi.longitude}"]`;
-          const found = !!document.querySelector(selector);
+          const lat = String(poi.latitude).trim();
+          const lng = String(poi.longitude).trim();
+          let selector = `.Pushpin.homePushpin[data-latitude="${lat}"][data-longitude="${lng}"]`;
+          let found = !!document.querySelector(selector);
+          if (!found) {
+            const pushpins = document.querySelectorAll(".Pushpin.homePushpin");
+            for (const pin of pushpins) {
+              const pinLat = pin.getAttribute("data-latitude");
+              const pinLng = pin.getAttribute("data-longitude");
+              if (pinLat && pinLng) {
+                const latDiff = Math.abs(parseFloat(lat) - parseFloat(pinLat));
+                const lngDiff = Math.abs(parseFloat(lng) - parseFloat(pinLng));
+                if (latDiff < 1e-5 && lngDiff < 1e-5) {
+                  found = true;
+                  break;
+                }
+              }
+            }
+          }
           if (found && !this._hasLoggedRedfinMarker) {
             this.log("Redfin native marker detected");
             this._hasLoggedRedfinMarker = true;
@@ -1089,9 +1106,26 @@ var window = (() => {
           if (typeof this._hasLoggedHomesMarker === "undefined") {
             this._hasLoggedHomesMarker = false;
           }
-          const coord = `${poi.latitude},${poi.longitude}`;
-          const selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
-          const found = !!document.querySelector(selector);
+          const lat = String(poi.latitude).trim();
+          const lng = String(poi.longitude).trim();
+          const coord = `${lat},${lng}`;
+          let selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
+          let found = !!document.querySelector(selector);
+          if (!found) {
+            const markers = document.querySelectorAll(".custom-marker.gmaps-adv-marker");
+            for (const marker of markers) {
+              const cuscor = marker.getAttribute("data-cuscor");
+              if (cuscor) {
+                const [markerLat, markerLng] = cuscor.split(",").map((s) => parseFloat(s.trim()));
+                const latDiff = Math.abs(parseFloat(lat) - markerLat);
+                const lngDiff = Math.abs(parseFloat(lng) - markerLng);
+                if (latDiff < 1e-5 && lngDiff < 1e-5) {
+                  found = true;
+                  break;
+                }
+              }
+            }
+          }
           if (found && !this._hasLoggedHomesMarker) {
             this.log("Homes.com native marker detected");
             this._hasLoggedHomesMarker = true;
@@ -1268,6 +1302,95 @@ var window = (() => {
           this.activeMarkers = /* @__PURE__ */ new Map();
           this.markerPool = new MarkerPool();
           this.activeElements = /* @__PURE__ */ new Map();
+          this._nativeMarkersInjected = false;
+          this._nativeMarkerObserver = null;
+          this._nativeMarkerPollInterval = null;
+          this._startNativeMarkerObserver();
+          this._startNativeMarkerPolling();
+        }
+        /**
+         * Gets the CSS selector for native markers
+         * @returns {string} CSS selector for extension-injected native markers
+         * @protected
+         */
+        _getNativeMarkerSelector() {
+          return ".poi-native-marker, .poi-native-marker-mapbox, .poi-native-marker-realtor";
+        }
+        /**
+         * Sets up a MutationObserver to watch for native marker insertion
+         * @private
+         */
+        _startNativeMarkerObserver() {
+          if (typeof window === "undefined" || typeof document === "undefined")
+            return;
+          if (this._nativeMarkerObserver)
+            return;
+          const callback = (mutationsList) => {
+            if (this._nativeMarkersInjected)
+              return;
+            const selector = this._getNativeMarkerSelector();
+            if (selector && document.querySelector(selector)) {
+              this._nativeMarkersInjected = true;
+              this.log("Native marker detected by MutationObserver, clearing overlay markers");
+              this.clear();
+            }
+          };
+          this._nativeMarkerObserver = new MutationObserver(callback);
+          this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+        }
+        /**
+         * Stops the MutationObserver
+         * @private
+         */
+        _stopNativeMarkerObserver() {
+          if (this._nativeMarkerObserver) {
+            this._nativeMarkerObserver.disconnect();
+            this._nativeMarkerObserver = null;
+          }
+        }
+        /**
+         * Starts periodic polling to check if native markers have appeared
+         * @private
+         */
+        _startNativeMarkerPolling() {
+          if (typeof window === "undefined" || typeof document === "undefined")
+            return;
+          if (this._nativeMarkerPollInterval)
+            return;
+          this.log("Starting native marker polling (250ms)...");
+          let lastDetectedCount = 0;
+          this._nativeMarkerPollInterval = setInterval(() => {
+            try {
+              if (this._nativeMarkersInjected) {
+                this._stopNativeMarkerPolling();
+                return;
+              }
+              const selector = this._getNativeMarkerSelector();
+              if (!selector)
+                return;
+              const nativeMarkers = document.querySelectorAll(selector);
+              const count = nativeMarkers.length;
+              if (count > 0 && lastDetectedCount === 0) {
+                this._nativeMarkersInjected = true;
+                this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
+                this.clear();
+                this._stopNativeMarkerPolling();
+              }
+              lastDetectedCount = count;
+            } catch (e) {
+              this.log("Error during native marker polling:", e);
+            }
+          }, 250);
+        }
+        /**
+         * Stops the periodic polling
+         * @private
+         */
+        _stopNativeMarkerPolling() {
+          if (this._nativeMarkerPollInterval) {
+            clearInterval(this._nativeMarkerPollInterval);
+            this._nativeMarkerPollInterval = null;
+          }
         }
         /**
          * Finds elements matching selector within Shadow DOM
@@ -1365,6 +1488,27 @@ var window = (() => {
          * @param {Object} mapInstance - The map instance
          */
         renderMarkers(pois, mapInstance) {
+          if (this._nativeMarkersInjected) {
+            this.log("Native markers injected (flag set), skipping overlay render");
+            return;
+          }
+          if (pois && pois.length > 0) {
+            const selector = this._getNativeMarkerSelector();
+            if (selector) {
+              const nativeMarkers = document.querySelectorAll(selector);
+              if (nativeMarkers.length > 0) {
+                this._nativeMarkersInjected = true;
+                this.log("Native markers detected at render time, clearing overlay");
+                this.clear();
+                return;
+              }
+            }
+          }
+          if (typeof window !== "undefined" && window.poiState && window.poiState.nativeMode) {
+            this.log("Native mode active, clearing overlay markers");
+            this.clear();
+            return;
+          }
           if (!mapInstance) {
             this.log("No map instance provided");
             return;
@@ -1509,6 +1653,8 @@ var window = (() => {
          * Cleanup resources
          */
         cleanup() {
+          this._stopNativeMarkerPolling();
+          this._stopNativeMarkerObserver();
           this.clear();
           this.markerPool.clear();
           this.detectedMapType = null;
@@ -1537,6 +1683,95 @@ var window = (() => {
           this.activeMarkers = /* @__PURE__ */ new Map();
           this._hasLoggedGoogleMarkers = false;
           this._hasLoggedMapboxMarkers = false;
+          this._nativeMarkersInjected = false;
+          this._nativeMarkerObserver = null;
+          this._nativeMarkerPollInterval = null;
+          this._startNativeMarkerObserver();
+          this._startNativeMarkerPolling();
+        }
+        /**
+         * Gets the CSS selector for native markers
+         * @returns {string} CSS selector for extension-injected native markers
+         * @protected
+         */
+        _getNativeMarkerSelector() {
+          return ".poi-native-marker, .poi-native-marker-mapbox, .poi-native-marker-generic";
+        }
+        /**
+         * Sets up a MutationObserver to watch for native marker insertion
+         * @private
+         */
+        _startNativeMarkerObserver() {
+          if (typeof window === "undefined" || typeof document === "undefined")
+            return;
+          if (this._nativeMarkerObserver)
+            return;
+          const callback = (mutationsList) => {
+            if (this._nativeMarkersInjected)
+              return;
+            const selector = this._getNativeMarkerSelector();
+            if (selector && document.querySelector(selector)) {
+              this._nativeMarkersInjected = true;
+              this.log("Native marker detected by MutationObserver, clearing overlay markers");
+              this.clear();
+            }
+          };
+          this._nativeMarkerObserver = new MutationObserver(callback);
+          this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+        }
+        /**
+         * Stops the MutationObserver
+         * @private
+         */
+        _stopNativeMarkerObserver() {
+          if (this._nativeMarkerObserver) {
+            this._nativeMarkerObserver.disconnect();
+            this._nativeMarkerObserver = null;
+          }
+        }
+        /**
+         * Starts periodic polling to check if native markers have appeared
+         * @private
+         */
+        _startNativeMarkerPolling() {
+          if (typeof window === "undefined" || typeof document === "undefined")
+            return;
+          if (this._nativeMarkerPollInterval)
+            return;
+          this.log("Starting native marker polling (250ms)...");
+          let lastDetectedCount = 0;
+          this._nativeMarkerPollInterval = setInterval(() => {
+            try {
+              if (this._nativeMarkersInjected) {
+                this._stopNativeMarkerPolling();
+                return;
+              }
+              const selector = this._getNativeMarkerSelector();
+              if (!selector)
+                return;
+              const nativeMarkers = document.querySelectorAll(selector);
+              const count = nativeMarkers.length;
+              if (count > 0 && lastDetectedCount === 0) {
+                this._nativeMarkersInjected = true;
+                this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
+                this.clear();
+                this._stopNativeMarkerPolling();
+              }
+              lastDetectedCount = count;
+            } catch (e) {
+              this.log("Error during native marker polling:", e);
+            }
+          }, 250);
+        }
+        /**
+         * Stops the periodic polling
+         * @private
+         */
+        _stopNativeMarkerPolling() {
+          if (this._nativeMarkerPollInterval) {
+            clearInterval(this._nativeMarkerPollInterval);
+            this._nativeMarkerPollInterval = null;
+          }
         }
         /**
          * @override
@@ -1598,6 +1833,27 @@ var window = (() => {
          * @param {Object} mapInstance - The map instance
          */
         renderMarkers(pois, mapInstance) {
+          if (this._nativeMarkersInjected) {
+            this.log("Native markers injected (flag set), skipping overlay render");
+            return;
+          }
+          if (pois && pois.length > 0) {
+            const selector = this._getNativeMarkerSelector();
+            if (selector) {
+              const nativeMarkers = document.querySelectorAll(selector);
+              if (nativeMarkers.length > 0) {
+                this._nativeMarkersInjected = true;
+                this.log("Native markers detected at render time, clearing overlay");
+                this.clear();
+                return;
+              }
+            }
+          }
+          if (typeof window !== "undefined" && window.poiState && window.poiState.nativeMode) {
+            this.log("Native mode active, clearing overlay markers");
+            this.clear();
+            return;
+          }
           const filteredPois = this._filterNativePois(pois);
           if (!mapInstance) {
             this.log("No map instance provided");
@@ -1766,6 +2022,8 @@ var window = (() => {
          * Cleanup resources
          */
         cleanup() {
+          this._stopNativeMarkerPolling();
+          this._stopNativeMarkerObserver();
           this.clear();
           this.markerPool.clear();
           this.detectedMapType = null;
@@ -2433,6 +2691,24 @@ var window = (() => {
         if (window.overlayRegistry) {
           const activeEntries = window.overlayRegistry.getActiveEntries();
           for (const entry of activeEntries) {
+            if (entry.overlay) {
+              const selector = entry.overlay._getNativeMarkerSelector?.();
+              if (selector) {
+                const nativeMarkers = document.querySelectorAll(selector);
+                if (nativeMarkers.length > 0) {
+                  if (!entry.overlay._nativeMarkersInjected) {
+                    entry.overlay._nativeMarkersInjected = true;
+                    console.log(PREFIX + `Native markers detected (pre-render check: ${nativeMarkers.length} found), clearing overlay`);
+                    entry.overlay.clear();
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (window.overlayRegistry) {
+          const activeEntries = window.overlayRegistry.getActiveEntries();
+          for (const entry of activeEntries) {
             if (entry.overlay && window.poiRenderer?.lastPoiData?.length > 0) {
               entry.overlay.renderMarkers(window.poiRenderer.lastPoiData, entry.mapInstance);
             }
@@ -2444,7 +2720,7 @@ var window = (() => {
         console.error(PREFIX + "Main loop failure:", e);
       }
     }
-    setInterval(loop, 1e3);
+    setInterval(loop, 500);
     setInterval(() => {
       if (window.overlayRegistry) {
         window.overlayRegistry.cleanup();
@@ -2452,12 +2728,20 @@ var window = (() => {
     }, 3e5);
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "POI_DATA_UPDATE") {
+        let nativeRenderSuccess = false;
         if (window.overlayRegistry) {
           const entries = window.overlayRegistry.getActiveEntries();
           for (const entry of entries) {
-            if (entry.overlay) {
+            if (entry.overlay && entry.mapInstance) {
               entry.overlay.renderMarkers(event.data.pois, entry.mapInstance);
+              const hasActiveMarkers = entry.overlay.activeMarkers && entry.overlay.activeMarkers.size > 0 || entry.overlay.activeElements && entry.overlay.activeElements.size > 0;
+              if (hasActiveMarkers) {
+                nativeRenderSuccess = true;
+              }
             }
+          }
+          if (nativeRenderSuccess) {
+            window.postMessage({ type: "POI_NATIVE_ACTIVE" }, "*");
           }
         }
         if (window.poiRenderer) {
@@ -3146,12 +3430,13 @@ var window = (() => {
     }
     /**
      * Gets the CSS selector for native markers on this site
-     * Override in subclass to provide site-specific selectors
+     * Override in subclass to provide site-specific selectors (e.g., site's own pins)
+     * Base class returns the extension's native marker class for automatic switching
      * @returns {string|null} CSS selector or null if no native markers expected
      * @protected
      */
     _getNativeMarkerSelector() {
-      return null;
+      return ".poi-native-marker, .poi-native-marker-mapbox";
     }
     /**
      * Starts periodic polling to check if native markers have appeared
@@ -3165,7 +3450,8 @@ var window = (() => {
         return;
       if (this._nativeMarkerPollInterval)
         return;
-      this.log("Starting native marker polling...");
+      this.log("Starting native marker polling (250ms)...");
+      let lastDetectedCount = 0;
       this._nativeMarkerPollInterval = setInterval(() => {
         try {
           if (this._nativeMarkersInjected) {
@@ -3177,16 +3463,18 @@ var window = (() => {
             return;
           }
           const nativeMarkers = document.querySelectorAll(selector);
-          if (nativeMarkers.length > 0) {
+          const count = nativeMarkers.length;
+          if (count > 0 && lastDetectedCount === 0) {
             this._nativeMarkersInjected = true;
-            this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+            this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
             this.clear();
             this._stopNativeMarkerPolling();
           }
+          lastDetectedCount = count;
         } catch (e) {
           this.log("Error during native marker polling:", e);
         }
-      }, 1e3);
+      }, 250);
     }
     /**
      * Stops the periodic native marker polling
@@ -3359,9 +3647,20 @@ var window = (() => {
      */
     renderMarkers(pois, mapInstance) {
       if (this._nativeMarkersInjected) {
-        this.log("Native markers injected, clearing overlay markers");
-        this.clear();
+        this.log("Native markers injected (flag set), skipping overlay render");
         return;
+      }
+      if (pois && pois.length > 0) {
+        const selector = this._getNativeMarkerSelector();
+        if (selector) {
+          const nativeMarkers = document.querySelectorAll(selector);
+          if (nativeMarkers.length > 0) {
+            this._nativeMarkersInjected = true;
+            this.log("Site native markers detected at render time, clearing overlay");
+            this.clear();
+            return;
+          }
+        }
       }
       const filteredPois = this._filterNativePois(pois);
       if (!mapInstance) {
@@ -3500,7 +3799,8 @@ var window = (() => {
         return;
       if (this._nativeMarkerPollInterval)
         return;
-      this.log("Starting native marker polling...");
+      this.log("Starting native marker polling (250ms)...");
+      let lastDetectedCount = 0;
       this._nativeMarkerPollInterval = setInterval(() => {
         try {
           if (this._nativeMarkersInjected) {
@@ -3512,25 +3812,28 @@ var window = (() => {
             return;
           }
           const nativeMarkers = document.querySelectorAll(selector);
-          if (nativeMarkers.length > 0) {
+          const count = nativeMarkers.length;
+          if (count > 0 && lastDetectedCount === 0) {
             this._nativeMarkersInjected = true;
-            this.log(`Native markers detected by polling (${nativeMarkers.length} found), clearing overlay markers`);
+            this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
             this.clear();
             this._stopNativeMarkerPolling();
           }
+          lastDetectedCount = count;
         } catch (e) {
           this.log("Error during native marker polling:", e);
         }
-      }, 1e3);
+      }, 250);
     }
     /**
      * Gets the CSS selector for native markers on this site
-     * Override in subclass to provide site-specific selectors
+     * Override in subclass to provide site-specific selectors (e.g., site's own pins)
+     * Base class returns the extension's native marker class for automatic switching
      * @returns {string|null} CSS selector or null if no native markers expected
      * @protected
      */
     _getNativeMarkerSelector() {
-      return null;
+      return ".poi-native-marker-mapbox, .poi-native-marker";
     }
     /**
      * Disconnects the MutationObserver (call on cleanup)
@@ -3565,9 +3868,20 @@ var window = (() => {
      */
     renderMarkers(pois, mapInstance) {
       if (this._nativeMarkersInjected) {
-        this.log("Native markers injected, clearing overlay markers");
-        this.clear();
+        this.log("Native markers injected (flag set), skipping overlay render");
         return;
+      }
+      if (pois && pois.length > 0) {
+        const selector = this._getNativeMarkerSelector();
+        if (selector) {
+          const nativeMarkers = document.querySelectorAll(selector);
+          if (nativeMarkers.length > 0) {
+            this._nativeMarkersInjected = true;
+            this.log("Site native markers detected at render time, clearing overlay");
+            this.clear();
+            return;
+          }
+        }
       }
       if (typeof window !== "undefined" && window.poiState && window.poiState.nativeMode) {
         this.log("Native mode active, clearing overlay markers");
