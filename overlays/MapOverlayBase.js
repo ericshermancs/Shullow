@@ -238,6 +238,43 @@ class MapOverlayBase {
   }
 
   /**
+   * Checks if a native marker for this POI exists in the DOM
+   * Logs only once per overlay session, not per POI.
+   * Can be overridden by subclasses for site-specific logic
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if native marker exists
+   */
+  _hasNativeMarker(poi) {
+    if (typeof this._hasLoggedNativeMarker === 'undefined') {
+      this._hasLoggedNativeMarker = false;
+      this._nativeMarkerPreviouslyFound = false;
+    }
+    // Only check for EXACT class "poi-native-marker" - overlay markers have suffixes like -generic, -mapbox, -realtor
+    const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
+    const found = !!document.querySelector(selector);
+    // Only log once when native marker is first detected in this overlay session
+    if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
+      this.log('Native marker detected');
+      this._hasLoggedNativeMarker = true;
+    }
+    // Track if native marker was ever found
+    if (found) {
+      this._nativeMarkerPreviouslyFound = true;
+    }
+    return found;
+  }
+
+  /**
+   * Filters POIs to exclude those with native markers
+   * @param {Array} pois - Array of POI objects
+   * @returns {Array} Filtered POIs
+   */
+  _filterNativePois(pois) {
+    console.log("Filtering native POIs");
+    return pois.filter(poi => !this._hasNativeMarker(poi));
+  }
+
+  /**
    * Filters POIs to only those within the current map bounds
    * @param {Array} pois - Array of POI objects
    * @returns {Array} Filtered POIs within bounds
@@ -260,8 +297,6 @@ class MapOverlayBase {
 }
 
 // Export for ES modules and window global for script tag inclusion
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = MapOverlayBase;
-} else if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.MapOverlayBase = MapOverlayBase;
 }

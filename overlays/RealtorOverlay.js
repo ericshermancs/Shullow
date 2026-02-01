@@ -119,6 +119,17 @@ class RealtorOverlay extends MapOverlayBase {
   }
 
   /**
+   * Checks if a native marker for this POI exists in the DOM
+   * Uses base class implementation which looks for any poi-native-marker class
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if native marker exists
+   */
+  _hasNativeMarker(poi) {
+    // Use base class implementation which looks for any [class^="poi-native-marker"]
+    return super._hasNativeMarker(poi);
+  }
+
+  /**
    * @override
    * Renders markers, delegating to the appropriate renderer
    * @param {Array} pois - Array of POI objects
@@ -142,10 +153,13 @@ class RealtorOverlay extends MapOverlayBase {
       }
     }
 
+    // Filter out POIs that already have a native marker
+    const filteredPois = this._filterNativePois(pois);
+
     if (this.detectedMapType === 'google') {
-      this._renderGoogleMarkers(pois, mapInstance);
+      this._renderGoogleMarkers(filteredPois, mapInstance);
     } else if (this.detectedMapType === 'mapbox') {
-      this._renderMapboxMarkers(pois, mapInstance);
+      this._renderMapboxMarkers(filteredPois, mapInstance);
     }
   }
 

@@ -49,11 +49,13 @@ class MapboxOverlayBase extends MapOverlayBase {
 
   /**
    * @override
-   * Renders markers for the given POIs on the Mapbox map
+   * Renders markers for Mapbox overlays
    * @param {Array} pois - Array of POI objects
-   * @param {Object} mapInstance - The Mapbox GL JS instance
+   * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    const filteredPois = this._filterNativePois(pois);
+
     if (!mapInstance) {
       this.log('No map instance provided');
       return;
@@ -71,7 +73,7 @@ class MapboxOverlayBase extends MapOverlayBase {
 
     const usedIds = new Set();
 
-    pois.forEach(poi => {
+    filteredPois.forEach(poi => {
       const id = `${mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`;
       usedIds.add(id);
 
@@ -97,7 +99,7 @@ class MapboxOverlayBase extends MapOverlayBase {
       }
     });
 
-    this.log(`Rendered ${pois.length} markers, active: ${this.activeMarkers.size}`);
+    this.log(`Rendered ${filteredPois.length} markers, active: ${this.activeMarkers.size}`);
   }
 
   /**
@@ -242,11 +244,27 @@ class MapboxOverlayBase extends MapOverlayBase {
 
     return null;
   }
+
+  /**
+   * Filters out POIs with native markers
+   * @param {Array} pois - Array of POI objects
+   * @returns {Array} Filtered POI objects
+   */
+  _filterNativePois(pois) {
+    return pois.filter(poi => !this.hasNativeMarker(poi));
+  }
+
+  /**
+   * Checks if a POI has a native marker
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if the POI has a native marker
+   */
+  hasNativeMarker(poi) {
+    return this.activeMarkers.has(`${this._mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`);
+  }
 }
 
 // Export for different module systems
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = MapboxOverlayBase;
-} else if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.MapboxOverlayBase = MapboxOverlayBase;
 }

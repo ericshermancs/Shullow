@@ -19,14 +19,18 @@ class GenericMapOverlay extends MapOverlayBase {
     super(debug);
     this.siteId = 'generic';
     this.detectedMapType = null; // 'google' or 'mapbox'
-    
+
     // For Google Maps rendering
     this.markerPool = new MarkerPool();
     this.activeElements = new Map();
     this.batchOverlay = null;
-    
+
     // For Mapbox rendering
     this.activeMarkers = new Map();
+
+    // Suppress repeated logs
+    this._hasLoggedGoogleMarkers = false;
+    this._hasLoggedMapboxMarkers = false;
   }
 
   /**
@@ -80,11 +84,12 @@ class GenericMapOverlay extends MapOverlayBase {
 
   /**
    * @override
-   * Renders markers, delegating to the appropriate renderer
+   * Renders markers for generic overlays
    * @param {Array} pois - Array of POI objects
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    const filteredPois = this._filterNativePois(pois);
     if (!mapInstance) {
       this.log('No map instance provided');
       return;
@@ -103,9 +108,9 @@ class GenericMapOverlay extends MapOverlayBase {
     }
 
     if (this.detectedMapType === 'google') {
-      this._renderGoogleMarkers(pois, mapInstance);
+      this._renderGoogleMarkers(filteredPois, mapInstance);
     } else if (this.detectedMapType === 'mapbox') {
-      this._renderMapboxMarkers(pois, mapInstance);
+      this._renderMapboxMarkers(filteredPois, mapInstance);
     }
   }
 
@@ -117,7 +122,10 @@ class GenericMapOverlay extends MapOverlayBase {
    */
   _renderGoogleMarkers(pois, mapInstance) {
     if (!window.google || !window.google.maps || !window.google.maps.OverlayView) {
-      this.log('Google Maps API not available');
+      if (!this._hasLoggedGoogleMarkers) {
+        this.log('Google Maps API not available');
+        this._hasLoggedGoogleMarkers = true;
+      }
       return;
     }
 
@@ -130,7 +138,14 @@ class GenericMapOverlay extends MapOverlayBase {
 
     if (mapInstance._poiBatchLayer) {
       mapInstance._poiBatchLayer.updatePois(pois);
-      this.log(`Rendered ${pois.length} Google markers`);
+      if (pois.length > 0) {
+        if (!this._hasLoggedGoogleMarkers) {
+          this.log(`Rendered ${pois.length} Google markers`);
+          this._hasLoggedGoogleMarkers = true;
+        }
+      } else {
+        this._hasLoggedGoogleMarkers = false;
+      }
     }
   }
 
@@ -142,7 +157,10 @@ class GenericMapOverlay extends MapOverlayBase {
    */
   _renderMapboxMarkers(pois, mapInstance) {
     if (!window.mapboxgl || !window.mapboxgl.Marker) {
-      this.log('Mapbox GL JS not available');
+      if (!this._hasLoggedMapboxMarkers) {
+        this.log('Mapbox GL JS not available');
+        this._hasLoggedMapboxMarkers = true;
+      }
       return;
     }
 
@@ -175,7 +193,14 @@ class GenericMapOverlay extends MapOverlayBase {
       }
     });
 
-    this.log(`Rendered ${pois.length} Mapbox markers`);
+    if (pois.length > 0) {
+      if (!this._hasLoggedMapboxMarkers) {
+        this.log(`Rendered ${pois.length} Mapbox markers`);
+        this._hasLoggedMapboxMarkers = true;
+      }
+    } else {
+      this._hasLoggedMapboxMarkers = false;
+    }
   }
 
   /**

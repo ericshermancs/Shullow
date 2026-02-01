@@ -47,6 +47,14 @@ class HomesComOverlay extends GoogleMapsOverlayBase {
   }
 
   /**
+   * Checks if a native marker for this POI exists in the DOM
+   * Uses base class implementation
+   */
+  _hasNativeMarker(poi) {
+    return super._hasNativeMarker(poi);
+  }
+
+  /**
    * @override
    * Detects the Homes.com map container, including Shadow DOM
    * @returns {HTMLElement|null} The map container element

@@ -53,7 +53,7 @@
     initializeRegistry();
 
     // 2. Initialize Sniffers (Once)
-    if (!window.poiSniff._initialized) {
+    if (!window.poiSniff.initialized) {
        window.poiSniff.init();
        console.log(PREFIX + 'Omni-Sniffer v12.10 Active');
        document.documentElement.setAttribute('data-poi-bridge-status', 'ONLINE');

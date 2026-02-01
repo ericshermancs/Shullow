@@ -140,9 +140,6 @@ class ManagerBase {
   }
 }
 
-// Export for different module systems
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ManagerBase;
-} else if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.ManagerBase = ManagerBase;
 }

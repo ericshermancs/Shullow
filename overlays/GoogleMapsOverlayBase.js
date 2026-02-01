@@ -29,6 +29,43 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     this.markerPool = new MarkerPool();
     this.batchOverlay = null;
     this.activeElements = new Map(); // POI ID -> Element
+    this._nativeMarkersInjected = false; // Flag to track native marker injection
+
+    this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
+
+    // --- Automatic native marker detection and overlay clearing ---
+    this._nativeMarkerObserver = null;
+    this._startNativeMarkerObserver();
+  }
+
+  /**
+   * Sets up a MutationObserver to watch for native marker insertion and auto-clear overlays
+   */
+  _startNativeMarkerObserver() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (this._nativeMarkerObserver) return;
+    const callback = (mutationsList) => {
+      this.log('MutationObserver callback fired', mutationsList);
+      if (this._nativeMarkersInjected) return;
+      // Look for any element with class 'poi-native-marker' (not overlay markers)
+      if (document.querySelector('.poi-native-marker')) {
+        this._nativeMarkersInjected = true;
+        this.log('Native marker detected by MutationObserver, clearing overlay markers');
+        this.clear();
+      }
+    };
+    this._nativeMarkerObserver = new MutationObserver(callback);
+    this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  /**
+   * Disconnects the MutationObserver (call on cleanup)
+   */
+  _stopNativeMarkerObserver() {
+    if (this._nativeMarkerObserver) {
+      this._nativeMarkerObserver.disconnect();
+      this._nativeMarkerObserver = null;
+    }
   }
 
   /**
@@ -105,6 +142,10 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
       updatePois(newPois) {
         this.pois = newPois;
+        if (newPois && newPois.length > 0) {
+          // Set flag to indicate native markers are injected
+          self._nativeMarkersInjected = true;
+        }
         if (this.getProjection()) this.draw();
       }
 
@@ -208,11 +249,18 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
   /**
    * @override
-   * Renders markers for the given POIs on the Google Map
+   * Renders markers for Google Maps overlays
    * @param {Array} pois - Array of POI objects
-   * @param {Object} mapInstance - The Google Maps instance
+   * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    // If native markers have been injected, proactively clear overlays
+    if (this._nativeMarkersInjected) {
+      this.log('Native markers injected, clearing overlay markers');
+      this.clear(); // Remove overlay markers immediately
+      return;
+    }
+    const filteredPois = this._filterNativePois(pois);
     if (!mapInstance) {
       this.log('No map instance provided');
       return;
@@ -233,8 +281,8 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     }
 
     // Update POI data
-    mapInstance._poiBatchLayer.updatePois(pois);
-    this.log(`Rendered ${pois.length} markers`);
+    mapInstance._poiBatchLayer.updatePois(filteredPois);
+    this.log(`Rendered ${filteredPois.length} markers`);
   }
 
   /**
@@ -299,13 +347,13 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
       this.batchOverlay = null;
     }
 
+    this._stopNativeMarkerObserver();
+
     super.cleanup();
   }
 }
 
 // Export for different module systems
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = GoogleMapsOverlayBase;
-} else if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.GoogleMapsOverlayBase = GoogleMapsOverlayBase;
 }

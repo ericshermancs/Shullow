@@ -172,7 +172,7 @@ class OverlayFactory {
     const siteConfig = this.getSiteConfig(domain);
     const overlayName = siteConfig.overlay;
     
-    this.log(`Creating overlay for ${domain}: ${overlayName}`);
+    console.log(`Creating overlay for ${domain}: ${overlayName}`);
     
     const OverlayClass = this.overlayClasses[overlayName];
     if (!OverlayClass) {

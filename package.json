@@ -1,5 +1,11 @@
 {
   "dependencies": {
     "playwright": "^1.58.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.12"
+  },
+  "scripts": {
+    "build:bridge": "node build-bridge.js"
   }
 }
