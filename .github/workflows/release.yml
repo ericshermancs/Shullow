@@ -31,7 +31,9 @@ jobs:
           powershell Compress-Archive -Path manifest.json,background,bridge,content,data,options,overlay,overlays,popup -DestinationPath dist\shullow-${{ github.event.release.tag_name }}.zip
 
       - name: Package extension as CRX
-        run: npx crx pack . --key=key.pem --out=dist/shullow-${{ github.event.release.tag_name }}.crx
+        run: |
+          npx crx pack . --private-key=key.pem
+          move shullow.crx dist\shullow-${{ github.event.release.tag_name }}.crx
 
       - name: Upload ZIP Release Asset
         uses: actions/upload-release-asset@v1
