@@ -183,8 +183,6 @@ class MapDiscoveryManager extends ManagerBase {
        if (this._idleCounter % 10 !== 0) return; 
     }
     
-    console.log('[MapDiscoveryManager] run() called, active maps:', window.poiHijack.activeMaps.size);
-    
     // A. Mapbox Global Registry
     this._discoverMapboxGlobal();
     
@@ -227,7 +225,6 @@ class MapDiscoveryManager extends ManagerBase {
       // Only look for gmp-map (map containers), NOT gmp-advanced-marker (individual markers)
       // gmp-advanced-marker elements will have map references that shouldn't be treated as new maps
       const elements = this.findAllInShadow(document, 'gmp-map');
-      console.log('[MapDiscoveryManager] Found gmp-map elements:', elements.length);
       
       elements.forEach(el => {
         const map = el.map || el.innerMap || el.getMap?.();
@@ -270,45 +267,6 @@ class MapDiscoveryManager extends ManagerBase {
       elements.forEach(el => {
         let curr = el;
         
-        // Debug: log element properties first time we see a .gm-style element
-        if (sel === '.gm-style') {
-          const props = Object.keys(el).filter(k => !k.startsWith('webkit') && !k.startsWith('on'));
-          console.log('[MapDiscoveryManager] .gm-style element properties:', props.slice(0, 20));
-          
-          // Try to find map via React fiber
-          const fiberKey = Object.keys(el).find(k => k.startsWith('__reactFiber'));
-          if (fiberKey) {
-            console.log('[MapDiscoveryManager] Found React fiber key:', fiberKey);
-            let fiber = el[fiberKey];
-            let level = 0;
-            while (fiber && level < 20) {
-              level++;
-              
-              // Check memoizedProps
-              if (fiber.memoizedProps) {
-                for (const p of mapProps) {
-                  try {
-                    const val = fiber.memoizedProps[p];
-                    if (val && typeof val.getBounds === 'function') {
-                      console.log('[MapDiscoveryManager] Found map via fiber.memoizedProps at level', level, 'property:', p);
-                      this._registerMap(val, el);
-                      return;
-                    }
-                  } catch (e) {}
-                }
-              }
-              
-              // Check stateNode
-              if (fiber.stateNode && typeof fiber.stateNode.getBounds === 'function') {
-                console.log('[MapDiscoveryManager] Found map via fiber.stateNode at level', level);
-                this._registerMap(fiber.stateNode, el);
-                return;
-              }
-              
-              fiber = fiber.return;
-            }
-          }
-        }
         
         for (let i = 0; i < 5 && curr; i++) {
           for (const p of mapProps) { 
