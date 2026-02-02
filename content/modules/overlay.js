@@ -214,6 +214,13 @@ class OverlayManager {
     }
   }
 
+  removeMarkersForGroup(groupName) {
+    if (!this.overlay) return;
+    // Use CSS selector to get only markers for this group (much faster than find loop)
+    this.overlay.querySelectorAll(`.poi-marker-overlay[data-group="${groupName}"]`).forEach(m => m.remove());
+    this.updateDebug();
+  }
+
   showPopup(poi, x, y, color) {
     this.hidePopup();
     
@@ -350,6 +357,7 @@ class OverlayManager {
            pin = document.createElement('div');
            pin.className = 'poi-marker-overlay';
            pin.setAttribute('data-poi-id', poiId);
+           pin.setAttribute('data-group', poi.groupName); // Add group attribute for fast filtering
            const style = pref.groupStyles[poi.groupName] || {};
            const color = style.color || pref.accentColor || '#ff0000';
            const secondaryColor = style.secondaryColor || '#ffffff';

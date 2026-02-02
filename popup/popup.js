@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     previews.forEach(p => p.style.background = color);
   };
   const saveData = async () => {
+    console.log('[POI POPUP] saveData called');
     await StorageManager.saveState(preferences, activeGroups);
     StorageManager.notifyContentScript(activeGroups, preferences);
   };
@@ -253,10 +254,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  groupsContainer.addEventListener('change', (e) => {
+  groupsContainer.addEventListener('change', async (e) => {
     if (e.target.classList.contains('group-toggle')) {
       activeGroups[e.target.dataset.group] = e.target.checked;
-      saveData();
+      await saveData();
     }
   });
 
@@ -269,6 +270,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const pois = importData(ev.target.result, file.name.endsWith('.json') ? 'json' : 'csv');
       if (pois.length) {
         await savePOIs(pois, groupName);
+        // Add new group to activeGroups as active and notify content script
+        activeGroups[groupName] = true;
+        await saveData();
         newGroupNameInput.value = '';
         await renderGroups();
         updateStatus('IMPORTED ' + pois.length);

@@ -4,11 +4,20 @@
  * 
  * Updated for Phase 7.2: Uses POIStateManager class
  */
-(function() {
+(async function() {
   console.log('POI Main: Content script loaded and executing.');
   
   // Phase 7.2: Use POIStateManager instance (either from window or create new)
   const state = window.poiState || (window.poiState = new POIStateManager());
+
+  // Initialize state from storage FIRST before starting the stability loop
+  if (typeof state.initializeState === 'function') {
+    await state.initializeState();
+    console.log('POI Main: State initialized. Active groups:', Object.keys(state.activeGroups).filter(k => state.activeGroups[k]));
+  } else if (typeof state.initialize === 'function') {
+    // ManagerBase pattern
+    await state.initialize();
+  }
 
   // Stability Loop: Monitors for map container presence/change
   setInterval(() => {
@@ -43,17 +52,5 @@
      }
   } catch(e) {
      console.error('POI Main: Failed to inject bridge scripts', e);
-  }
-
-  // Initialize - use class method if available
-  if (typeof state.initializeState === 'function') {
-    state.initializeState().then(() => {
-      state.refresh();
-    });
-  } else if (typeof state.initialize === 'function') {
-    // ManagerBase pattern
-    state.initialize().then(() => {
-      state.refresh();
-    });
   }
 })();
