@@ -26,16 +26,82 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
     this.reduxStore = null;
     this.reduxUnsubscribe = null;
     this._storeSubscribed = false;
+    
+    // Start more aggressive polling for Redfin (100ms instead of 250ms)
+    // Redfin's pushpins appear very quickly and we need to catch them
+    this._startAggressiveNativeMarkerPolling();
+  }
+
+  /**
+   * Starts aggressive polling (100ms) specifically for Redfin
+   * Redfin renders pushpins very quickly so we need faster detection
+   * @private
+   */
+  _startAggressiveNativeMarkerPolling() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      console.log('[RedfinOverlay] Cannot start aggressive polling: window or document undefined');
+      return;
+    }
+    if (this._aggressivePollInterval) {
+      console.log('[RedfinOverlay] Aggressive polling already running');
+      return;
+    }
+    
+    console.log('[RedfinOverlay] Starting aggressive native marker polling (100ms)...');
+    this.log('Starting aggressive native marker polling (100ms) for Redfin...');
+    let lastDetectedCount = 0;
+    
+    this._aggressivePollInterval = setInterval(() => {
+      try {
+        if (this._nativeMarkersInjected) {
+          console.log('[RedfinOverlay] Native markers already injected, stopping aggressive polling');
+          this._stopAggressiveNativeMarkerPolling();
+          return;
+        }
+        
+        const selector = this._getNativeMarkerSelector();
+        if (!selector) return;
+        
+        const nativeMarkers = document.querySelectorAll(selector);
+        const count = nativeMarkers.length;
+        
+        if (count > 0 && lastDetectedCount === 0) {
+          this._nativeMarkersInjected = true;
+          console.log(`[RedfinOverlay] Native markers detected by aggressive polling (${count} found)`);
+          this.log(`Redfin native markers detected by aggressive polling (${count} found), immediately clearing overlay`);
+          this.clear();
+          this._stopAggressiveNativeMarkerPolling();
+        }
+        lastDetectedCount = count;
+      } catch (e) {
+        console.error('[RedfinOverlay] Error during aggressive native marker polling:', e);
+        this.log('Error during aggressive native marker polling:', e);
+      }
+    }, 100); // Poll every 100ms (vs 250ms in base class)
+  }
+
+  /**
+   * Stops aggressive polling
+   * @private
+   */
+  _stopAggressiveNativeMarkerPolling() {
+    if (this._aggressivePollInterval) {
+      console.log('[RedfinOverlay] Stopping aggressive polling');
+      clearInterval(this._aggressivePollInterval);
+      this._aggressivePollInterval = null;
+    }
   }
 
   /**
    * @override
    * Gets the CSS selector for Redfin native markers
+   * Returns multiple selectors with increasing specificity to catch all variations
    * @returns {string} CSS selector for Redfin pushpins
    * @protected
    */
   _getNativeMarkerSelector() {
-    return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"]';
+    // Return selector for all possible Redfin marker patterns
+    return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"], .Pushpin[class*="Pushpin"], [aria-label*="home"]';
   }
 
   /**
@@ -256,6 +322,8 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
    * Cleanup resources
    */
   cleanup() {
+    this._stopAggressiveNativeMarkerPolling();
+    
     if (this.reduxUnsubscribe) {
       try {
         this.reduxUnsubscribe();

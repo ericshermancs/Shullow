@@ -17,6 +17,8 @@ class MapOverlayBase {
       throw new Error('MapOverlayBase is abstract and cannot be instantiated directly');
     }
     
+    console.log(`[${this.constructor.name}] Constructor called`);
+    
     this.debug = debug;
     this.mapInstance = null;
     this.container = null;

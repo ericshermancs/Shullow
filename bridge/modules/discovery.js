@@ -32,6 +32,51 @@ class MapDiscoveryManager extends ManagerBase {
   }
 
   /**
+   * Attempts to extract a map-like instance from a candidate object
+   * @param {any} candidate
+   * @returns {any|null}
+   * @private
+   */
+  _extractMapFromCandidate(candidate) {
+    try {
+      if (!candidate || typeof candidate !== 'object') return null;
+      if (typeof candidate.getBounds === 'function' || typeof candidate.setCenter === 'function') {
+        return candidate;
+      }
+
+      const visited = new WeakSet();
+      const queue = [candidate];
+      let depth = 0;
+
+      while (queue.length > 0 && depth < 2) {
+        const nextQueue = [];
+        for (const obj of queue) {
+          if (!obj || typeof obj !== 'object') continue;
+          if (visited.has(obj)) continue;
+          visited.add(obj);
+
+          const keys = Object.keys(obj);
+          for (const key of keys) {
+            try {
+              const val = obj[key];
+              if (!val || typeof val !== 'object') continue;
+              if (typeof val.getBounds === 'function' || typeof val.setCenter === 'function') {
+                return val;
+              }
+              nextQueue.push(val);
+            } catch (e) {}
+          }
+        }
+        queue.length = 0;
+        queue.push(...nextQueue);
+        depth++;
+      }
+    } catch (e) {}
+
+    return null;
+  }
+
+  /**
    * Registers a discovered map with the OverlayRegistry
    * Domain detection happens HERE at discovery time.
    * @param {Object} map - The map instance
@@ -41,17 +86,22 @@ class MapDiscoveryManager extends ManagerBase {
   _registerMap(map, container = null) {
     if (!map) return;
     
+    console.log('[MapDiscoveryManager] _registerMap called with map:', map);
+    
     // Add to hijack's activeMaps for backwards compatibility
     window.poiHijack.activeMaps.add(map);
     window.poiHijack.attachListeners(map);
-    
+
     // PHASE 6.5: Register with OverlayRegistry
     // Domain is detected HERE and locked to this map
     if (window.overlayRegistry) {
+      console.log('[MapDiscoveryManager] Calling overlayRegistry.register()');
       const entry = window.overlayRegistry.register(map, container);
       if (entry && entry.overlay) {
         this.log(`Registered map ${entry.id} with overlay for domain: ${entry.domain}`);
       }
+    } else {
+      console.warn('[MapDiscoveryManager] overlayRegistry not available!');
     }
   }
 
@@ -133,6 +183,8 @@ class MapDiscoveryManager extends ManagerBase {
        if (this._idleCounter % 10 !== 0) return; 
     }
     
+    console.log('[MapDiscoveryManager] run() called, active maps:', window.poiHijack.activeMaps.size);
+    
     // A. Mapbox Global Registry
     this._discoverMapboxGlobal();
     
@@ -151,15 +203,19 @@ class MapDiscoveryManager extends ManagerBase {
     try { 
       if (window.mapboxgl?.getInstances) {
         const instances = window.mapboxgl.getInstances();
+        console.log('[MapDiscoveryManager] Mapbox global registry found:', instances?.length || 0, 'instances');
         instances?.forEach(map => {
           if (map && typeof map.getBounds === 'function') {
             // PHASE 6.5: Use _registerMap instead of direct add
             const container = map._container || null;
+            console.log('[MapDiscoveryManager] Registering Mapbox map');
             this._registerMap(map, container);
           }
         });
       }
-    } catch(e) {}
+    } catch(e) {
+      console.error('[MapDiscoveryManager] Error in Mapbox discovery:', e);
+    }
   }
 
   /**
@@ -168,14 +224,22 @@ class MapDiscoveryManager extends ManagerBase {
    */
   _discoverWebComponents() {
     try {
-      this.findAllInShadow(document, 'gmp-map, gmp-advanced-marker').forEach(el => {
+      // Only look for gmp-map (map containers), NOT gmp-advanced-marker (individual markers)
+      // gmp-advanced-marker elements will have map references that shouldn't be treated as new maps
+      const elements = this.findAllInShadow(document, 'gmp-map');
+      console.log('[MapDiscoveryManager] Found gmp-map elements:', elements.length);
+      
+      elements.forEach(el => {
         const map = el.map || el.innerMap || el.getMap?.();
         if (map && typeof map.getBounds === 'function') {
+          console.log('[MapDiscoveryManager] Registering gmp-map');
            // PHASE 6.5: Use _registerMap, pass the element as container context
            this._registerMap(map, el);
         }
       });
-    } catch(e) {}
+    } catch(e) {
+      console.error('[MapDiscoveryManager] Error in web components discovery:', e);
+    }
   }
 
   /**
@@ -194,17 +258,74 @@ class MapDiscoveryManager extends ManagerBase {
        'div[class*="Map"]',
        'div[class*="map"]'
     ];
-    const mapProps = ['map', 'mapInstance', 'innerMap', '__google_map__', 'mapObject', 'viewer'];
+    const mapProps = ['map', 'mapInstance', 'innerMap', '__google_map__', 'mapObject', 'viewer', '__e3_'];
     
+    let foundCount = 0;
     selectors.forEach(sel => {
-      this.findAllInShadow(document, sel).forEach(el => {
+      const elements = this.findAllInShadow(document, sel);
+      if (elements.length > 0) {
+        console.log('[MapDiscoveryManager] Found', elements.length, 'elements with selector:', sel);
+      }
+      
+      elements.forEach(el => {
         let curr = el;
+        
+        // Debug: log element properties first time we see a .gm-style element
+        if (sel === '.gm-style') {
+          const props = Object.keys(el).filter(k => !k.startsWith('webkit') && !k.startsWith('on'));
+          console.log('[MapDiscoveryManager] .gm-style element properties:', props.slice(0, 20));
+          
+          // Try to find map via React fiber
+          const fiberKey = Object.keys(el).find(k => k.startsWith('__reactFiber'));
+          if (fiberKey) {
+            console.log('[MapDiscoveryManager] Found React fiber key:', fiberKey);
+            let fiber = el[fiberKey];
+            let level = 0;
+            while (fiber && level < 20) {
+              level++;
+              
+              // Check memoizedProps
+              if (fiber.memoizedProps) {
+                for (const p of mapProps) {
+                  try {
+                    const val = fiber.memoizedProps[p];
+                    if (val && typeof val.getBounds === 'function') {
+                      console.log('[MapDiscoveryManager] Found map via fiber.memoizedProps at level', level, 'property:', p);
+                      this._registerMap(val, el);
+                      return;
+                    }
+                  } catch (e) {}
+                }
+              }
+              
+              // Check stateNode
+              if (fiber.stateNode && typeof fiber.stateNode.getBounds === 'function') {
+                console.log('[MapDiscoveryManager] Found map via fiber.stateNode at level', level);
+                this._registerMap(fiber.stateNode, el);
+                return;
+              }
+              
+              fiber = fiber.return;
+            }
+          }
+        }
+        
         for (let i = 0; i < 5 && curr; i++) {
           for (const p of mapProps) { 
             try { 
-              if (curr[p] && typeof curr[p].getBounds === 'function') {
+              const candidate = curr[p];
+              if (candidate && typeof candidate.getBounds === 'function') {
+                console.log('[MapDiscoveryManager] Found map instance via', p, 'selector:', sel);
+                foundCount++;
                 // PHASE 6.5: Use _registerMap with container context
-                this._registerMap(curr[p], el);
+                this._registerMap(candidate, el);
+              } else if (candidate && typeof candidate === 'object') {
+                const extracted = this._extractMapFromCandidate(candidate);
+                if (extracted) {
+                  console.log('[MapDiscoveryManager] Extracted map instance via', p, 'selector:', sel);
+                  foundCount++;
+                  this._registerMap(extracted, el);
+                }
               }
             } catch(e) {} 
           }
@@ -221,6 +342,12 @@ class MapDiscoveryManager extends ManagerBase {
                       this.log('Discovery found map via Fiber prop:', p);
                       // PHASE 6.5: Use _registerMap with container context
                       this._registerMap(val, el);
+                    } else if (val && typeof val === 'object') {
+                      const extracted = this._extractMapFromCandidate(val);
+                      if (extracted) {
+                        this.log('Discovery extracted map via Fiber prop:', p);
+                        this._registerMap(extracted, el);
+                      }
                     }
                   } catch(e) {} 
                 } 

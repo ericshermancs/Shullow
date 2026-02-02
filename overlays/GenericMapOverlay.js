@@ -16,30 +16,215 @@
  */
 class GenericMapOverlay extends MapOverlayBase {
   constructor(debug = false) {
-    super(debug);
-    this.siteId = 'generic';
-    this.detectedMapType = null; // 'google' or 'mapbox'
+    try {
+      super(debug);
+      console.log('[GenericMapOverlay] Constructor called');
+      this.siteId = 'generic';
+      this.detectedMapType = null; // 'google' or 'mapbox'
 
-    // For Google Maps rendering
-    this.markerPool = new MarkerPool();
-    this.activeElements = new Map();
-    this.batchOverlay = null;
+      // For Google Maps rendering
+      this.markerPool = new MarkerPool();
+      this.activeElements = new Map();
+      this.batchOverlay = null;
 
-    // For Mapbox rendering
-    this.activeMarkers = new Map();
+      // For Mapbox rendering
+      this.activeMarkers = new Map();
 
-    // Suppress repeated logs
-    this._hasLoggedGoogleMarkers = false;
-    this._hasLoggedMapboxMarkers = false;
+      // Suppress repeated logs
+      this._hasLoggedGoogleMarkers = false;
+      this._hasLoggedMapboxMarkers = false;
+      
+      // Native marker detection infrastructure
+      this._nativeMarkersInjected = false;
+      this._nativeMarkerObserver = null;
+      this._nativeMarkerPollInterval = null;
+      
+      // Heuristic detection for non-enumerated sites
+      this._siteNativeMarkerPatterns = [];
+      this._detectedSiteMarkerCount = 0;
+      this._markerDetectionAttempts = 0;
+      
+      // IMMEDIATE CHECK: Do site native markers already exist?
+      // This handles cases where the site renders markers before our overlay loads
+      console.log('[GenericMapOverlay] Running immediate native marker check...');
+      this._checkForExistingNativeMarkers();
+      
+      // Start native marker detection
+      console.log('[GenericMapOverlay] Starting observer...');
+      this._startNativeMarkerObserver();
+      console.log('[GenericMapOverlay] Starting polling...');
+      this._startNativeMarkerPolling();
+      console.log('[GenericMapOverlay] Starting heuristic learning...');
+      this._startHeuristicMarkerLearning();
+      console.log('[GenericMapOverlay] Constructor complete');
+    } catch (err) {
+      console.error('[GenericMapOverlay] CRITICAL ERROR in constructor:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Override hijack to unwrap Web Component wrappers
+   * Some sites (like apartments.com) wrap the map in a Web Component (gmp-map)
+   * We need to unwrap it to get the actual Google Maps instance
+   * @param {Object} mapInstance - The map instance to hijack
+   * @returns {Object} - The result from parent hijack
+   */
+  hijack(mapInstance) {
+    console.log('[GenericMapOverlay] hijack() called with mapInstance:', {
+      type: typeof mapInstance,
+      constructor: mapInstance?.constructor?.name,
+      hasBounds: typeof mapInstance?.getBounds === 'function'
+    });
+
+    // Handle gmp-map Web Component wrapper
+    if (mapInstance && !mapInstance.getBounds) {
+      if (mapInstance.map) {
+        console.log('[GenericMapOverlay] Unwrapping via .map property');
+        mapInstance = mapInstance.map;
+      } else if (mapInstance.innerMap) {
+        console.log('[GenericMapOverlay] Unwrapping via .innerMap property');
+        mapInstance = mapInstance.innerMap;
+      } else if (typeof mapInstance.getMap === 'function') {
+        console.log('[GenericMapOverlay] Unwrapping via .getMap() method');
+        mapInstance = mapInstance.getMap();
+      }
+    }
+
+    console.log('[GenericMapOverlay] After unwrapping:', {
+      type: typeof mapInstance,
+      constructor: mapInstance?.constructor?.name,
+      hasBounds: typeof mapInstance?.getBounds === 'function'
+    });
+
+    return super.hijack(mapInstance);
+  }
+
+  /**
+   * Immediately check if site native markers already exist
+   * This prevents the overlay from rendering if native markers are present
+   * @private
+   */
+  _checkForExistingNativeMarkers() {
+    try {
+      // Common patterns for site native markers (not extension-injected)
+      const commonPatterns = [
+        // Google Maps web components
+        'gmp-advanced-marker',
+        '[class*="advanced-marker"]',
+        '[data-marker-id]',
+        
+        // Mapbox markers
+        '.mapboxgl-popup',
+        '[class*="mapbox"][class*="marker"]',
+        
+        // Generic marker patterns
+        '[aria-label*="marker"]',
+        '[class*="marker"][class*="pin"]',
+        '[class*="map-marker"]',
+      ];
+
+      for (const selector of commonPatterns) {
+        try {
+          const markers = this._querySelectorAllMaybeShadow(selector);
+          if (markers.length > 0) {
+            console.log(`[GenericMapOverlay] Found ${markers.length} existing native markers using selector: ${selector}`);
+            this.log(`Found ${markers.length} existing native markers (${selector}), skipping overlay`);
+            this._nativeMarkersInjected = true;
+            return; // Don't render overlay, native markers already here
+          }
+        } catch (e) {
+          // Invalid selector, continue
+        }
+      }
+      
+      console.log('[GenericMapOverlay] No existing native markers found');
+    } catch (err) {
+      console.error('[GenericMapOverlay] Error in immediate native marker check:', err);
+    }
+  }
+
+  /**
+   * Analyzes the page to learn site-specific marker patterns
+   * This helps detect native markers on non-enumerated sites
+   * @private
+   */
+  _startHeuristicMarkerLearning() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      console.log('[GenericMapOverlay] Cannot start heuristic learning: window or document undefined');
+      return;
+    }
     
-    // Native marker detection infrastructure
-    this._nativeMarkersInjected = false;
-    this._nativeMarkerObserver = null;
-    this._nativeMarkerPollInterval = null;
+    console.log('[GenericMapOverlay] Heuristic learning scheduled for 2s from now');
     
-    // Start native marker detection
-    this._startNativeMarkerObserver();
-    this._startNativeMarkerPolling();
+    // Run analysis after a brief delay to let page stabilize
+    setTimeout(() => {
+      try {
+        console.log('[GenericMapOverlay] Running heuristic marker analysis now');
+        this._analyzePageForMarkerPatterns();
+      } catch (e) {
+        console.error('[GenericMapOverlay] Error in heuristic marker learning:', e);
+        this.log('Error in heuristic marker learning:', e);
+      }
+    }, 2000);
+  }
+
+  /**
+   * Analyzes the page for common marker patterns
+   * Tests various selectors and learns which ones find markers
+   * @private
+   */
+  _analyzePageForMarkerPatterns() {
+    const commonPatterns = [
+      // Mapbox patterns
+      { selector: '.mapboxgl-popup', name: 'mapbox-popup', type: 'mapbox' },
+      { selector: '[class*="mapbox"][class*="marker"]', name: 'mapbox-marker-class', type: 'mapbox' },
+      
+      // Google Maps patterns
+      { selector: '[aria-label*="marker"]', name: 'google-aria-marker', type: 'google' },
+      { selector: '[data-marker-id]', name: 'data-marker-id', type: 'any' },
+      { selector: '[data-place-id]', name: 'data-place-id', type: 'any' },
+      
+      // Leaflet
+      { selector: '.leaflet-marker-icon', name: 'leaflet-marker', type: 'leaflet' },
+      
+      // Generic patterns (use with caution - low confidence)
+      { selector: '[class*="pin"][class*="marker"]', name: 'pin-marker-combo', type: 'any' },
+      { selector: '[aria-label*="location"]', name: 'aria-location', type: 'any' },
+      
+      // Custom marker patterns (high variance per site)
+      { selector: '[class*="marker"]', name: 'any-marker-class', type: 'any' },
+      { selector: '[class*="pin"]', name: 'any-pin-class', type: 'any' },
+      { selector: '[class*="home"]', name: 'any-home-class', type: 'any' },
+      { selector: '[role="button"][aria-label]', name: 'aria-button-label', type: 'any' }
+    ];
+
+    const foundPatterns = [];
+    
+    for (const pattern of commonPatterns) {
+      try {
+        const elements = this._querySelectorAllMaybeShadow(pattern.selector);
+        if (elements.length > 0) {
+          foundPatterns.push({
+            selector: pattern.selector,
+            name: pattern.name,
+            type: pattern.type,
+            count: elements.length
+          });
+          console.log(`[GenericMapOverlay] Found ${elements.length} elements matching "${pattern.name}" (${pattern.selector})`);
+          this.log(`Found ${elements.length} elements matching "${pattern.name}" (${pattern.selector})`);
+        }
+      } catch (e) {
+        // Invalid selector, skip
+      }
+    }
+
+    // Store patterns for later polling
+    if (foundPatterns.length > 0) {
+      this._siteNativeMarkerPatterns = foundPatterns;
+      console.log(`[GenericMapOverlay] Learned site marker patterns: ${foundPatterns.length} patterns`);
+      this.log('Learned site marker patterns:', foundPatterns.length, 'patterns');
+    }
   }
 
   /**
@@ -52,12 +237,77 @@ class GenericMapOverlay extends MapOverlayBase {
   }
 
   /**
+   * Determines whether a selector is likely to appear in Shadow DOM
+   * @param {string} selector
+   * @returns {boolean}
+   * @private
+   */
+  _shouldSearchShadow(selector) {
+    return selector.includes('gmp-') || selector.includes('advanced-marker');
+  }
+
+  /**
+   * Finds elements matching a selector within Shadow DOM trees
+   * @param {Document|ShadowRoot} root
+   * @param {string} selector
+   * @param {Array<HTMLElement>} found
+   * @returns {Array<HTMLElement>}
+   * @private
+   */
+  _findAllInShadow(root, selector, found = []) {
+    if (!root || typeof root.querySelectorAll !== 'function') return found;
+
+    try {
+      found.push(...root.querySelectorAll(selector));
+    } catch (e) {
+      return found;
+    }
+
+    const all = root.querySelectorAll('*');
+    for (const el of all) {
+      if (el.shadowRoot) {
+        this._findAllInShadow(el.shadowRoot, selector, found);
+      }
+    }
+
+    return found;
+  }
+
+  /**
+   * Query selector that optionally searches Shadow DOM when needed
+   * @param {string} selector
+   * @returns {Array<HTMLElement>}
+   * @private
+   */
+  _querySelectorAllMaybeShadow(selector) {
+    if (typeof document === 'undefined') return [];
+    let direct = [];
+    try {
+      direct = Array.from(document.querySelectorAll(selector));
+    } catch (e) {
+      return [];
+    }
+
+    if (direct.length > 0 || !this._shouldSearchShadow(selector)) return direct;
+
+    return this._findAllInShadow(document, selector);
+  }
+
+  /**
    * Sets up a MutationObserver to watch for native marker insertion
    * @private
    */
   _startNativeMarkerObserver() {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    if (this._nativeMarkerObserver) return;
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      console.log('[GenericMapOverlay] Cannot start observer: window or document undefined');
+      return;
+    }
+    if (this._nativeMarkerObserver) {
+      console.log('[GenericMapOverlay] Observer already running');
+      return;
+    }
+    
+    console.log('[GenericMapOverlay] Setting up MutationObserver');
     
     const callback = (mutationsList) => {
       if (this._nativeMarkersInjected) return;
@@ -65,6 +315,7 @@ class GenericMapOverlay extends MapOverlayBase {
       const selector = this._getNativeMarkerSelector();
       if (selector && document.querySelector(selector)) {
         this._nativeMarkersInjected = true;
+        console.log('[GenericMapOverlay] Native marker detected by MutationObserver');
         this.log('Native marker detected by MutationObserver, clearing overlay markers');
         this.clear();
       }
@@ -72,6 +323,7 @@ class GenericMapOverlay extends MapOverlayBase {
     
     this._nativeMarkerObserver = new MutationObserver(callback);
     this._nativeMarkerObserver.observe(document.body, { childList: true, subtree: true });
+    console.log('[GenericMapOverlay] MutationObserver set up successfully');
   }
 
   /**
@@ -93,33 +345,110 @@ class GenericMapOverlay extends MapOverlayBase {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (this._nativeMarkerPollInterval) return;
     
-    this.log('Starting native marker polling (250ms)...');
+    console.log('[GenericMapOverlay] Starting native marker polling (500ms)...');
+    this.log('Starting native marker polling (500ms)...');
     let lastDetectedCount = 0;
+    let lastSiteMarkerCount = 0;
+    let pollCycle = 0;
     
     this._nativeMarkerPollInterval = setInterval(() => {
       try {
+        pollCycle++;
         if (this._nativeMarkersInjected) {
           this._stopNativeMarkerPolling();
           return;
         }
         
+        // Check for extension-injected markers
         const selector = this._getNativeMarkerSelector();
-        if (!selector) return;
+        if (selector) {
+          const nativeMarkers = document.querySelectorAll(selector);
+          const count = nativeMarkers.length;
+          
+          if (count > 0 && lastDetectedCount === 0) {
+            this._nativeMarkersInjected = true;
+            console.log(`[GenericMapOverlay] Extension native markers detected by polling (${count} found)`);
+            this.log(`Extension native markers detected by polling (${count} found), immediately clearing overlay`);
+            this.clear();
+            this._stopNativeMarkerPolling();
+            return;
+          }
+          lastDetectedCount = count;
+        }
         
-        const nativeMarkers = document.querySelectorAll(selector);
-        const count = nativeMarkers.length;
+        // Every 3 cycles (600ms), re-learn patterns to detect new markers
+        // This helps catch markers that appear after initial page load
+        if (pollCycle % 3 === 0) {
+          console.log(`[GenericMapOverlay] Re-learning patterns (cycle ${pollCycle})`);
+          this._analyzePageForMarkerPatterns();
+        }
         
-        if (count > 0 && lastDetectedCount === 0) {
+        // Check for site native markers using HARD-CODED common patterns
+        // (not just learned patterns - catch apartments.com's gmp-advanced-marker immediately)
+        const commonNativeMarkerPatterns = [
+          'gmp-advanced-marker',           // Google Maps web component
+          '[class*="advanced-marker"]',    // Google Maps CSS variant
+          '.mapboxgl-popup',               // Mapbox popup
+          '[data-marker-id]',              // Generic marker pattern
+          '[class*="map-marker"]',         // Generic marker class
+        ];
+        
+        let totalSiteMarkers = 0;
+        for (const selector of commonNativeMarkerPatterns) {
+          try {
+            const found = this._querySelectorAllMaybeShadow(selector);
+            totalSiteMarkers += found.length;
+          } catch (e) {
+            // Invalid selector
+          }
+        }
+        
+        // If hard-coded patterns found markers
+        if (totalSiteMarkers > 0 && lastSiteMarkerCount === 0) {
           this._nativeMarkersInjected = true;
-          this.log(`Native markers detected by polling (${count} found), immediately clearing overlay`);
+          console.log(`[GenericMapOverlay] Site native markers detected via polling (${totalSiteMarkers} found using common patterns)`);
+          this.log(`Site native markers detected via polling (${totalSiteMarkers} found using common patterns), switching to native mode`);
+          if (typeof window !== 'undefined' && window.poiState) {
+            window.poiState.nativeMode = true;
+          }
           this.clear();
           this._stopNativeMarkerPolling();
+          return;
         }
-        lastDetectedCount = count;
+        lastSiteMarkerCount = totalSiteMarkers;
+        
+        // Also check for site native markers using learned patterns (for site-specific detection)
+        if (this._siteNativeMarkerPatterns.length > 0) {
+          let learnedPatternMarkers = 0;
+          for (const pattern of this._siteNativeMarkerPatterns) {
+            try {
+              const found = this._querySelectorAllMaybeShadow(pattern.selector);
+              learnedPatternMarkers += found.length;
+            } catch (e) {
+              // Invalid selector
+            }
+          }
+          
+          // If learned patterns found markers (and common patterns didn't)
+          if (learnedPatternMarkers > 0 && totalSiteMarkers === 0) {
+            this._nativeMarkersInjected = true;
+            console.log(`[GenericMapOverlay] Site native markers detected via learned patterns (${learnedPatternMarkers} found using ${this._siteNativeMarkerPatterns.length} learned patterns)`);
+            this.log(`Site native markers detected via learned patterns (${learnedPatternMarkers} found), switching to native mode`);
+            if (typeof window !== 'undefined' && window.poiState) {
+              window.poiState.nativeMode = true;
+            }
+            this.clear();
+            this._stopNativeMarkerPolling();
+            return;
+          }
+        } else if (pollCycle % 6 === 0) {
+          console.log(`[GenericMapOverlay] Polling cycle ${pollCycle}: No patterns learned yet or no markers found`);
+        }
       } catch (e) {
+        console.error('[GenericMapOverlay] Error during native marker polling:', e);
         this.log('Error during native marker polling:', e);
       }
-    }, 250);
+    }, 500); // Poll every 500ms (less frequent, reduces CPU usage)
   }
 
   /**
@@ -189,33 +518,61 @@ class GenericMapOverlay extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    console.log('[GenericMapOverlay] renderMarkers() called with', pois?.length || 0, 'POIs');
+    
     // CRITICAL: Check native marker flag FIRST before any other logic
     if (this._nativeMarkersInjected) {
-      this.log('Native markers injected (flag set), skipping overlay render');
+      console.log('[GenericMapOverlay] Native markers already injected, skipping render');
+      this.log('Native markers already injected (flag set), skipping overlay render');
       return;
     }
     
-    // Actively check for native markers BEFORE rendering
-    if (pois && pois.length > 0) {
-      const selector = this._getNativeMarkerSelector();
-      if (selector) {
-        const nativeMarkers = document.querySelectorAll(selector);
-        if (nativeMarkers.length > 0) {
+    // ALSO check for site's native markers (e.g., gmp-advanced-marker on apartments.com)
+    const commonNativeSelectors = [
+      'gmp-advanced-marker',
+      '[class*="advanced-marker"]',
+      '.mapboxgl-popup',
+      '[data-marker-id]',
+      '[class*="map-marker"]'
+    ];
+    
+    for (const selector of commonNativeSelectors) {
+      try {
+        const siteNativeMarkers = this._querySelectorAllMaybeShadow(selector);
+        if (siteNativeMarkers.length > 0) {
           this._nativeMarkersInjected = true;
-          this.log('Native markers detected at render time, clearing overlay');
+          console.log(`[GenericMapOverlay] Site native markers detected (${selector}), skipping render`);
+          this.log(`Site native markers detected (${selector}), skipping overlay render`);
           this.clear();
           return;
         }
+      } catch (e) {
+        // Invalid selector, continue
+      }
+    }
+    
+    // Check for extension-injected markers
+    const selector = this._getNativeMarkerSelector();
+    if (selector) {
+      const nativeMarkers = document.querySelectorAll(selector);
+      if (nativeMarkers.length > 0) {
+        this._nativeMarkersInjected = true;
+        console.log('[GenericMapOverlay] Extension native markers detected at render time, clearing overlay');
+        this.log('Extension native markers detected at render time, clearing overlay');
+        this.clear();
+        return;
       }
     }
 
     // Check if native mode is active via global state
     if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
+      console.log('[GenericMapOverlay] Native mode active, clearing overlay markers');
       this.log('Native mode active, clearing overlay markers');
       this.clear();
       return;
     }
 
+    console.log('[GenericMapOverlay] Proceeding with overlay render');
     const filteredPois = this._filterNativePois(pois);
     if (!mapInstance) {
       this.log('No map instance provided');
@@ -425,7 +782,37 @@ class GenericMapOverlay extends MapOverlayBase {
     this.clear();
     this.markerPool.clear();
     this.detectedMapType = null;
+    this._siteNativeMarkerPatterns = [];
     super.cleanup();
+  }
+
+  /**
+   * @override
+   * Detects if site has native markers using learned patterns
+   * @param {Object} poi - POI object
+   * @returns {boolean} True if site native marker exists
+   * @protected
+   */
+  _hasSiteNativeMarker(poi) {
+    // If we've learned marker patterns, check them
+    if (this._siteNativeMarkerPatterns.length > 0) {
+      for (const pattern of this._siteNativeMarkerPatterns) {
+        try {
+          const markers = document.querySelectorAll(pattern.selector);
+          if (markers.length > 0) {
+            // Log once per detection to avoid spam
+            if (!this._hasLoggedSiteMarker) {
+              this.log(`Site native markers detected using learned pattern: ${pattern.name}`);
+              this._hasLoggedSiteMarker = true;
+            }
+            return true;
+          }
+        } catch (e) {
+          // Invalid selector
+        }
+      }
+    }
+    return false;
   }
 }
 

@@ -241,19 +241,24 @@ class OverlayRegistry {
 
     // Create overlay using factory or fallback
     let overlay = null;
+    let overlayClassName = 'unknown';
     if (this.factory) {
       overlay = this.factory.createOverlay(domain);
-      console.log('[OverlayRegistry] Created overlay via this.factory:', overlay, 'for domain:', domain);
+      if (overlay) overlayClassName = overlay.constructor.name;
+      console.log('[OverlayRegistry] Created overlay via this.factory:', overlayClassName, 'for domain:', domain);
     } else if (typeof window.overlayFactory !== 'undefined' && window.overlayFactory) {
       overlay = window.overlayFactory.createOverlay(domain);
-      console.log('[OverlayRegistry] Created overlay via window.overlayFactory:', overlay, 'for domain:', domain);
+      if (overlay) overlayClassName = overlay.constructor.name;
+      console.log('[OverlayRegistry] Created overlay via window.overlayFactory:', overlayClassName, 'for domain:', domain);
       // Fallback if overlay is still null
       if (!overlay && typeof window.GenericMapOverlay !== 'undefined') {
         overlay = new window.GenericMapOverlay();
+        overlayClassName = 'GenericMapOverlay (fallback)';
         console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
       }
     } else if (typeof window.GenericMapOverlay !== 'undefined') {
       overlay = new window.GenericMapOverlay();
+      overlayClassName = 'GenericMapOverlay (fallback)';
       console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
     } else {
       console.warn('[OverlayRegistry] No overlay factory or GenericMapOverlay found for domain:', domain);
@@ -276,7 +281,98 @@ class OverlayRegistry {
 
     this.log(`Registered map: ${id} for domain: ${domain}`);
     
+    // PHASE 6.6: PROACTIVE NATIVE MARKER DETECTION
+    // After creating overlay, immediately check if site has already rendered native markers
+    // This prevents race conditions where markers appear before overlay is fully initialized
+    if (overlay && typeof overlay._getNativeMarkerSelector === 'function') {
+      this._performNativeMarkerCheck(overlay, domain);
+    }
+    
     return entry;
+  }
+
+  /**
+   * Performs proactive native marker detection for a newly registered map
+   * This catches sites that have already rendered markers before the overlay initializes
+   * 
+   * @param {MapOverlayBase} overlay - The overlay instance
+   * @param {string} domain - The domain (for logging)
+   * @private
+   */
+  _performNativeMarkerCheck(overlay, domain) {
+    try {
+      // Schedule check after brief delay to let page stabilize
+      setTimeout(() => {
+        try {
+          // First check for extension-injected markers
+          const selector = overlay._getNativeMarkerSelector?.();
+          if (selector) {
+            const nativeMarkers = document.querySelectorAll(selector);
+            if (nativeMarkers.length > 0) {
+              console.log(`[OverlayRegistry] PRE-RENDER CHECK: Found ${nativeMarkers.length} extension native markers for ${domain}`);
+              
+              // Set the flag indicating native markers are present
+              if (overlay) {
+                overlay._nativeMarkersInjected = true;
+                console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain}`);
+              }
+              
+              // Also set global native mode flag
+              if (typeof window !== 'undefined' && window.poiState) {
+                window.poiState.nativeMode = true;
+                console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set window.poiState.nativeMode = true for ${domain}`);
+              }
+              
+              // Signal to content script
+              window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
+              return; // Exit early if extension markers found
+            }
+          }
+          
+          // ALSO check for site's own native markers (e.g., gmp-advanced-marker on apartments.com)
+          const siteNativeSelectors = [
+            'gmp-advanced-marker',
+            '[class*="advanced-marker"]',
+            '.mapboxgl-popup',
+            '[data-marker-id]',
+            '[class*="map-marker"]'
+          ];
+          
+          for (const sel of siteNativeSelectors) {
+            try {
+              const siteMarkers = document.querySelectorAll(sel);
+              if (siteMarkers.length > 0) {
+                console.log(`[OverlayRegistry] PRE-RENDER CHECK: Found ${siteMarkers.length} site native markers (${sel}) for ${domain}`);
+                
+                // Set the flag indicating native markers are present
+                if (overlay) {
+                  overlay._nativeMarkersInjected = true;
+                  console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain} (site markers)`);
+                }
+                
+                // Also set global native mode flag
+                if (typeof window !== 'undefined' && window.poiState) {
+                  window.poiState.nativeMode = true;
+                  console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set window.poiState.nativeMode = true for ${domain} (site markers)`);
+                }
+                
+                // Signal to content script
+                window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
+                return; // Exit after first match
+              }
+            } catch (e) {
+              // Invalid selector, continue
+            }
+          }
+          
+          this.log(`PRE-RENDER CHECK: No native markers found yet for ${domain}`);
+        } catch (e) {
+          this.log(`Error in pre-render native marker check for ${domain}:`, e);
+        }
+      }, 500); // Wait 500ms for page to stabilize
+    } catch (e) {
+      this.log(`Error scheduling native marker check for ${domain}:`, e);
+    }
   }
 
   /**
