@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Map POI Injector",
-  "version": "1.2",
-  "description": "Injects POI markers onto real estate map websites - Refactored OOP Architecture",
+  "name": "Shullow",
+  "version": "0.1",
+  "description": "Injects POI markers onto real estate map websites",
   "permissions": [
     "storage",
     "activeTab",

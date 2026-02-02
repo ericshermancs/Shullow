@@ -25,3 +25,7 @@ session-ses*
 # non-README.md markdowns
 *.md
 !README.md
+
+
+# Miscellaneous
+*.pem

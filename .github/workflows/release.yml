@@ -1,0 +1,54 @@
+name: Build and Package Extension
+
+on:
+  release:
+    types: [created, published]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build bridge
+        run: npm run build:bridge
+
+      - name: Write PEM key
+        run: echo "${{ secrets.CHROME_EXTENSION_KEY }}" > key.pem
+
+      - name: Package extension as ZIP
+        run: |
+          mkdir dist
+          powershell Compress-Archive -Path manifest.json,background,bridge,content,data,options,overlay,overlays,popup -DestinationPath dist\shullow-${{ github.event.release.tag_name }}.zip
+
+      - name: Package extension as CRX
+        run: npx crx pack . --key=key.pem --out=dist/shullow-${{ github.event.release.tag_name }}.crx
+
+      - name: Upload ZIP Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dist/shullow-${{ github.event.release.tag_name }}.zip
+          asset_name: shullow-${{ github.event.release.tag_name }}.zip
+          asset_content_type: application/zip
+
+      - name: Upload CRX Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dist/shullow-${{ github.event.release.tag_name }}.crx
+          asset_name: shullow-${{ github.event.release.tag_name }}.crx
+          asset_content_type: application/x-chrome-extension
