@@ -41,6 +41,7 @@ class OneKeyOverlay extends MapboxOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = OneKeyOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.OneKeyOverlay = OneKeyOverlay;
 }

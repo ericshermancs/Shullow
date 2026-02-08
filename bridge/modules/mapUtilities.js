@@ -189,7 +189,8 @@ class MapTypeDetector {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { MapUtils, MarkerPool, MapTypeDetector };
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.MapUtils = MapUtils;
   window.MarkerPool = MarkerPool;
   window.MapTypeDetector = MapTypeDetector;

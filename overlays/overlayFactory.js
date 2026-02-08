@@ -284,7 +284,8 @@ overlayFactory.loadConfig();
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { OverlayFactory, overlayFactory };
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.OverlayFactory = OverlayFactory;
   window.overlayFactory = overlayFactory;
 }

@@ -11,7 +11,7 @@
 
 // Default styles applied to all sites unless overridden
 const DEFAULT_STYLES = {
-  markerZIndex: 5000,
+  markerZIndex: 103,
   markerHoverZIndex: 1000000,
   containerZIndex: null,
   markerOpacity: 1.0,
@@ -60,7 +60,6 @@ const SITE_CONFIG = {
     styles: {
       // Could override here, e.g.: markerZIndex: 10000
       // Or remove: containerZIndex: null
-      markerZIndex: 10
 
     },
     
@@ -109,6 +108,7 @@ const SITE_CONFIG = {
     
     styles: {
       // Inherits defaults
+      markerZIndex: -100
     },
     
     features: {
@@ -376,7 +376,8 @@ class SiteConfigManager {
 // Export
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DEFAULT_STYLES, SITE_CONFIG, DOMAIN_ALIASES, SiteConfigManager };
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.DEFAULT_STYLES = DEFAULT_STYLES;
   window.SITE_CONFIG = SITE_CONFIG;
   window.DOMAIN_ALIASES = DOMAIN_ALIASES;

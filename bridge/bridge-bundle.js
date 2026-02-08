@@ -182,7 +182,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = { MapUtils, MarkerPool, MapTypeDetector: MapTypeDetector2 };
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.MapUtils = MapUtils;
         window.MarkerPool = MarkerPool;
         window.MapTypeDetector = MapTypeDetector2;
@@ -932,7 +933,7 @@ var window = (() => {
   var require_siteConfig = __commonJS({
     "overlays/siteConfig.js"(exports, module) {
       var DEFAULT_STYLES = {
-        markerZIndex: 5e3,
+        markerZIndex: 103,
         markerHoverZIndex: 1e6,
         containerZIndex: null,
         markerOpacity: 1,
@@ -974,7 +975,6 @@ var window = (() => {
           styles: {
             // Could override here, e.g.: markerZIndex: 10000
             // Or remove: containerZIndex: null
-            markerZIndex: 10
           },
           features: {
             reduxStore: true,
@@ -1017,6 +1017,7 @@ var window = (() => {
           ],
           styles: {
             // Inherits defaults
+            markerZIndex: -100
           },
           features: {
             reduxStore: false,
@@ -1223,7 +1224,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = { DEFAULT_STYLES, SITE_CONFIG, DOMAIN_ALIASES, SiteConfigManager };
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.DEFAULT_STYLES = DEFAULT_STYLES;
         window.SITE_CONFIG = SITE_CONFIG;
         window.DOMAIN_ALIASES = DOMAIN_ALIASES;
@@ -1267,7 +1269,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = ZillowOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.ZillowOverlay = ZillowOverlay;
       }
     }
@@ -1446,7 +1449,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = RedfinOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.RedfinOverlay = RedfinOverlay;
       }
     }
@@ -1536,7 +1540,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = HomesComOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.HomesComOverlay = HomesComOverlay;
       }
     }
@@ -1575,7 +1580,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = OneKeyOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.OneKeyOverlay = OneKeyOverlay;
       }
     }
@@ -1681,7 +1687,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = RealtorOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.RealtorOverlay = RealtorOverlay;
       }
     }
@@ -1799,7 +1806,8 @@ var window = (() => {
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = GenericMapOverlay;
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.GenericMapOverlay = GenericMapOverlay;
       }
     }
@@ -2397,7 +2405,8 @@ var window = (() => {
       overlayFactory.loadConfig();
       if (typeof module !== "undefined" && module.exports) {
         module.exports = { OverlayFactory, overlayFactory };
-      } else if (typeof window !== "undefined") {
+      }
+      if (typeof window !== "undefined") {
         window.OverlayFactory = OverlayFactory;
         window.overlayFactory = overlayFactory;
       }

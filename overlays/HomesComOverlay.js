@@ -100,6 +100,7 @@ class HomesComOverlay extends GoogleMapsOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = HomesComOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.HomesComOverlay = HomesComOverlay;
 }

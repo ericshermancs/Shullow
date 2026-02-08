@@ -41,6 +41,7 @@ class ZillowOverlay extends MapboxOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ZillowOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.ZillowOverlay = ZillowOverlay;
 }

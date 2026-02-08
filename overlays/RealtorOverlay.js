@@ -117,6 +117,7 @@ class RealtorOverlay extends MapOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = RealtorOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.RealtorOverlay = RealtorOverlay;
 }

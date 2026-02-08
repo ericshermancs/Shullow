@@ -203,6 +203,7 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = RedfinOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.RedfinOverlay = RedfinOverlay;
 }

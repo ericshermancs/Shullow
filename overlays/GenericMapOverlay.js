@@ -121,6 +121,7 @@ class GenericMapOverlay extends MapOverlayBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = GenericMapOverlay;
-} else if (typeof window !== 'undefined') {
+}
+if (typeof window !== 'undefined') {
   window.GenericMapOverlay = GenericMapOverlay;
 }
