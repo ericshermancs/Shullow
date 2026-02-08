@@ -14,6 +14,77 @@
 window.poiRenderer = {
   activeMarkers: new Map(), // Map<id, NativeMarker>
   lastPoiData: [],
+  configCache: new WeakMap(), // Cache configs per map instance
+  siteConfigReady: false,
+  
+  /**
+   * Checks if siteConfig is ready and initializes it
+   */
+  ensureSiteConfig() {
+    if (this.siteConfigReady) return true;
+    
+    if (window.siteConfig && typeof window.siteConfig.getConfig === 'function') {
+      this.siteConfigReady = true;
+      console.log('[Renderer] siteConfig ready');
+      return true;
+    }
+    
+    return false;
+  },
+  
+  /**
+   * Gets the domain for a map instance
+   */
+  getMapDomain(map) {
+    try {
+      // Try getDiv for Google Maps
+      if (typeof map.getDiv === 'function') {
+        const div = map.getDiv();
+        if (div && div.ownerDocument && div.ownerDocument.location) {
+          return div.ownerDocument.location.hostname;
+        }
+      }
+      
+      // Try _container for Mapbox
+      if (map._container && map._container.ownerDocument && map._container.ownerDocument.location) {
+        return map._container.ownerDocument.location.hostname;
+      }
+      
+      // Fallback to window
+      if (window === window.top) {
+        return window.location.hostname;
+      }
+    } catch (e) {
+      // Cross-origin or error
+    }
+    return '';
+  },
+  
+  /**
+   * Gets site configuration for a map (cached per map instance)
+   */
+  getSiteConfig(map) {
+    // Check cache first
+    if (this.configCache.has(map)) {
+      return this.configCache.get(map);
+    }
+    
+    // Ensure siteConfig is ready
+    if (!this.ensureSiteConfig()) {
+      console.warn('[Renderer] siteConfig not ready yet, using defaults');
+      const defaults = { styles: { markerZIndex: 5000, markerHoverZIndex: 1000000 } };
+      return defaults;
+    }
+    
+    const domain = this.getMapDomain(map);
+    const config = window.siteConfig.getConfig(domain);
+    
+    // Cache it
+    this.configCache.set(map, config);
+    
+    return config;
+  },
+  
    clear() {
       this.lastPoiData = [];
       // Clear Mapbox markers
@@ -126,18 +197,22 @@ window.poiRenderer = {
              this.container.addEventListener('mouseenter', (e) => {
                 const target = e.target.closest('.poi-native-marker');
                 if (target) {
-                   target.style.zIndex = '1000000';
+                   const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                   target.style.zIndex = (config.styles.markerHoverZIndex || 1000000).toString();
                    const id = target.getAttribute('data-id');
                    const lat = parseFloat(target.getAttribute('data-lat'));
                    const lng = parseFloat(target.getAttribute('data-lng'));
-                   window.postMessage({ type: 'POI_MARKER_HOVER', id, lat, lng }, '*');
+                   const message = { type: 'POI_MARKER_HOVER', id, lat, lng };
+                   console.log('[Renderer] Posting hover event:', message);
+                   window.postMessage(message, '*');
                 }
              }, true);
              
              this.container.addEventListener('mouseleave', (e) => {
                 const target = e.target.closest('.poi-native-marker');
                 if (target) {
-                   target.style.zIndex = '102'; // Restore base z-index
+                   const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                   target.style.zIndex = (config.styles.markerZIndex || 5000).toString();
                    const id = target.getAttribute('data-id');
                    window.postMessage({ type: 'POI_MARKER_LEAVE', id }, '*');
                 }
@@ -206,10 +281,12 @@ window.poiRenderer = {
                       el = document.createElement('div');
                       el.className = 'poi-native-marker';
                       // Styles are set once, only transform changes
+                      const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                      const baseZIndex = config.styles.markerZIndex || 5000;
                       el.style.cssText = `
                         position: absolute; width: 32px; height: 32px;
                         background-size: contain; background-repeat: no-repeat;
-                        pointer-events: auto; cursor: pointer; z-index: 102;
+                        pointer-events: auto; cursor: pointer; z-index: ${baseZIndex};
                         will-change: transform; top: 0; left: 0;
                         filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));
                       `;
@@ -296,8 +373,11 @@ window.poiRenderer = {
          </svg>
        `)}`;
 
+       const config = this.getSiteConfig(map);
+       const baseZIndex = config.styles.markerZIndex || 5000;
+       
        el.style.cssText = `
-         width: 32px; height: 32px; cursor: pointer; z-index: 5000;
+         width: 32px; height: 32px; cursor: pointer; z-index: ${baseZIndex};
          background-image: url('${logo || fallbackSvg}');
          background-size: contain; background-repeat: no-repeat;
          filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));
@@ -310,12 +390,15 @@ window.poiRenderer = {
        
        // Hover Listeners
        el.onmouseenter = () => {
-          el.style.zIndex = '1000000';
-          window.postMessage({ type: 'POI_MARKER_HOVER', id: poi.id, lat: poi.latitude, lng: poi.longitude }, '*');
+          const hoverZIndex = config.styles.markerHoverZIndex || 1000000;
+          el.style.zIndex = hoverZIndex.toString();
+          const message = { type: 'POI_MARKER_HOVER', id: poi.id, lat: poi.latitude, lng: poi.longitude };
+          console.log('[Renderer] Posting hover event (Mapbox):', message);
+          window.postMessage(message, '*');
        };
        
        el.onmouseleave = () => {
-          el.style.zIndex = '5000';
+          el.style.zIndex = baseZIndex.toString();
           window.postMessage({ type: 'POI_MARKER_LEAVE', id: poi.id }, '*');
        };
 

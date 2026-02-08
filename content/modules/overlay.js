@@ -157,6 +157,40 @@ class OverlayManager {
   render() {
     this.updateDebug();
   }
+
+  /**
+   * Handles native marker click from bridge
+   */
+  handleNativeClick(id, lat, lng) {
+    console.log('[OverlayManager] Native click:', id, lat, lng);
+    // Find the POI data
+    const poi = this.markerData.find(p => p.id === id || p.name === id);
+    if (poi) {
+      // Could show a popup/info window here in the future
+      console.log('[OverlayManager] POI clicked:', poi);
+    }
+  }
+
+  /**
+   * Handles native marker hover from bridge
+   */
+  handleNativeHover(id, lat, lng) {
+    console.log('[OverlayManager] Native hover:', id, lat, lng);
+    // Find the POI data
+    const poi = this.markerData.find(p => p.id === id || p.name === id);
+    if (poi) {
+      // Could show a tooltip here in the future
+      console.log('[OverlayManager] POI hovered:', poi);
+    }
+  }
+
+  /**
+   * Handles native marker leave (mouse out) from bridge
+   */
+  handleNativeLeave(id) {
+    console.log('[OverlayManager] Native leave:', id);
+    // Could hide tooltip here in the future
+  }
 }
 
 window.OverlayManager = OverlayManager;

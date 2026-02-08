@@ -12,7 +12,8 @@ import '../bridge/modules/discovery.js';
 import '../bridge/modules/portal.js';
 import '../bridge/modules/renderer.js';
 
-// Overlays (base classes first)
+// Overlays (config and base classes first)
+import '../overlays/siteConfig.js';
 import '../overlays/MapOverlayBase.js';
 import '../overlays/GoogleMapsOverlayBase.js';
 import '../overlays/MapboxOverlayBase.js';
