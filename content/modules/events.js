@@ -95,7 +95,25 @@
         const styleChanged = !!(msg.preferences && msg.preferences.groupStyles);
         const styleChangedGroup = msg.styleChangedGroup || null;
         console.log(`[EVENTS] Message received: styleChanged=${styleChanged}, styleChangedGroup=${styleChangedGroup}, groupStyles=${Object.keys(msg.preferences?.groupStyles || {}).join(',')}`);
-        state.refresh({ styleChanged, styleChangedGroup }).then(() => resp({ status: 'ok' }));
+        
+        // If style changed, do a two-step refresh: remove then re-add
+        if (styleChanged && styleChangedGroup && state.activeGroups[styleChangedGroup]) {
+          const wasActive = state.activeGroups[styleChangedGroup];
+          // Step 1: Remove the group
+          state.activeGroups[styleChangedGroup] = false;
+          state._skipStorageRead = true;
+          state.refresh().then(async () => {
+            // Step 2: Re-add the group with new styles
+            state.activeGroups[styleChangedGroup] = wasActive;
+            state._poiCache = null;
+            state._poiCacheTime = 0;
+            state._skipStorageRead = true;
+            await state.refresh();
+            resp({ status: 'ok' });
+          });
+        } else {
+          state.refresh().then(() => resp({ status: 'ok' }));
+        }
       }
       return true;
     };
