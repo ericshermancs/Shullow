@@ -1,5 +1,5 @@
 // bridge/entry.js
-// Imports all bridge modules and overlays for bundling
+// Imports all bridge modules for bundling
 
 import '../bridge/main.js';
 
@@ -12,16 +12,7 @@ import '../bridge/modules/discovery.js';
 import '../bridge/modules/portal.js';
 import '../bridge/modules/renderer.js';
 
-// Overlays (config and base classes first)
+// Site configuration and registry
 import '../overlays/siteConfig.js';
-import '../overlays/MapOverlayBase.js';
-import '../overlays/GoogleMapsOverlayBase.js';
-import '../overlays/MapboxOverlayBase.js';
-import '../overlays/ZillowOverlay.js';
-import '../overlays/RedfinOverlay.js';
-import '../overlays/HomesComOverlay.js';
-import '../overlays/OneKeyOverlay.js';
-import '../overlays/RealtorOverlay.js';
-import '../overlays/GenericMapOverlay.js';
 import '../overlays/OverlayRegistry.js';
-import '../overlays/overlayFactory.js';
+
