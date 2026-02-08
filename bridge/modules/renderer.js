@@ -21,6 +21,33 @@
 window.poiRenderer = {
   activeMarkers: new Map(), // Map<id, NativeMarker>
   lastPoiData: [],
+   clear() {
+      this.lastPoiData = [];
+      // Clear Mapbox markers
+      this.activeMarkers.forEach((marker) => {
+         if (marker && typeof marker.remove === 'function') {
+            marker.remove();
+         } else if (marker && typeof marker.setMap === 'function') {
+            marker.setMap(null);
+         }
+      });
+      this.activeMarkers.clear();
+
+      // Clear Google batch overlays if present
+      if (window.poiHijack && window.poiHijack.activeMaps) {
+         for (const map of window.poiHijack.activeMaps) {
+            if (map && map._poiBatchLayer) {
+               try {
+                  map._poiBatchLayer.setMap(null);
+               } catch (e) {}
+               if (map._poiBatchLayer.container) {
+                  map._poiBatchLayer.container.remove();
+               }
+               map._poiBatchLayer = null;
+            }
+         }
+      }
+   },
   
   update(pois) {
     this.lastPoiData = pois;

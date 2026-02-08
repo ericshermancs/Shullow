@@ -16,6 +16,15 @@
     {
       "matches": ["<all_urls>"],
       "js": [
+        "content/entry-gate.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": [
         "content/detector.js",
         "content/modules/state.js",
         "content/modules/overlay.js",
@@ -26,16 +35,6 @@
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_end"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": [
-        "bridge/bridge-bundle.js"
-      ],
-      "world": "MAIN",
-      "all_frames": true,
-      "match_about_blank": true,
-      "run_at": "document_start"
     }
   ],
   "background": {

@@ -3173,6 +3173,9 @@ var window = (() => {
     const PREFIX = " [POI TITAN] ";
     let attempts = 0;
     let registryInitialized = false;
+    let enabled = true;
+    let loopIntervalId = null;
+    let cleanupIntervalId = null;
     function extractBounds(map) {
       try {
         const b = map.getBounds();
@@ -3197,6 +3200,8 @@ var window = (() => {
       }
     }
     function loop() {
+      if (!enabled)
+        return;
       if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal) {
         if (attempts < 20) {
           attempts++;
@@ -3256,19 +3261,72 @@ var window = (() => {
         console.error(PREFIX + "Main loop failure:", e);
       }
     }
-    setInterval(loop, 500);
-    setInterval(() => {
-      if (window.overlayRegistry) {
-        window.overlayRegistry.cleanup();
+    function startBridge() {
+      if (enabled) {
+        if (!loopIntervalId) {
+          loopIntervalId = setInterval(loop, 500);
+        }
+        if (!cleanupIntervalId) {
+          cleanupIntervalId = setInterval(() => {
+            if (window.overlayRegistry) {
+              window.overlayRegistry.cleanup();
+            }
+          }, 3e5);
+        }
+        return;
       }
-    }, 3e5);
+      enabled = true;
+      document.documentElement.setAttribute("data-poi-bridge-status", "ONLINE");
+      loopIntervalId = setInterval(loop, 500);
+      cleanupIntervalId = setInterval(() => {
+        if (window.overlayRegistry) {
+          window.overlayRegistry.cleanup();
+        }
+      }, 3e5);
+      loop();
+    }
+    function stopBridge() {
+      enabled = false;
+      document.documentElement.removeAttribute("data-poi-bridge-status");
+      document.documentElement.removeAttribute("data-poi-bounds");
+      document.documentElement.removeAttribute("data-poi-map-type");
+      document.documentElement.removeAttribute("data-poi-timestamp");
+      if (loopIntervalId) {
+        clearInterval(loopIntervalId);
+        loopIntervalId = null;
+      }
+      if (cleanupIntervalId) {
+        clearInterval(cleanupIntervalId);
+        cleanupIntervalId = null;
+      }
+      if (window.overlayRegistry) {
+        window.overlayRegistry.clear();
+      }
+      if (window.poiRenderer && typeof window.poiRenderer.clear === "function") {
+        window.poiRenderer.clear();
+      }
+    }
+    startBridge();
     window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "POI_BRIDGE_ENABLE") {
+        if (event.data.enabled) {
+          startBridge();
+        } else {
+          stopBridge();
+        }
+        return;
+      }
+      if (!enabled)
+        return;
       if (event.data && event.data.type === "POI_DATA_UPDATE") {
+        console.log(`[BRIDGE] POI_DATA_UPDATE received: ${event.data.pois.length} POIs`);
         let nativeRenderSuccess = false;
         if (window.overlayRegistry) {
           const entries = window.overlayRegistry.getActiveEntries();
+          console.log(`[BRIDGE] Found ${entries.length} active overlays`);
           for (const entry of entries) {
             if (entry.overlay && entry.mapInstance) {
+              console.log(`[BRIDGE] Calling renderMarkers on overlay: ${entry.overlay.constructor.name}`);
               entry.overlay.renderMarkers(event.data.pois, entry.mapInstance);
               const hasActiveMarkers = entry.overlay.activeMarkers && entry.overlay.activeMarkers.size > 0 || entry.overlay.activeElements && entry.overlay.activeElements.size > 0;
               if (hasActiveMarkers) {
@@ -3286,6 +3344,16 @@ var window = (() => {
             window.postMessage({ type: "POI_NATIVE_ACTIVE" }, "*");
           }
         }
+      }
+    });
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "POI_BRIDGE_ENABLE") {
+        if (event.data.enabled) {
+          startBridge();
+        } else {
+          stopBridge();
+        }
+        return;
       }
     });
     if (window.poiHijack)
@@ -3420,6 +3488,31 @@ var window = (() => {
     activeMarkers: /* @__PURE__ */ new Map(),
     // Map<id, NativeMarker>
     lastPoiData: [],
+    clear() {
+      this.lastPoiData = [];
+      this.activeMarkers.forEach((marker) => {
+        if (marker && typeof marker.remove === "function") {
+          marker.remove();
+        } else if (marker && typeof marker.setMap === "function") {
+          marker.setMap(null);
+        }
+      });
+      this.activeMarkers.clear();
+      if (window.poiHijack && window.poiHijack.activeMaps) {
+        for (const map of window.poiHijack.activeMaps) {
+          if (map && map._poiBatchLayer) {
+            try {
+              map._poiBatchLayer.setMap(null);
+            } catch (e) {
+            }
+            if (map._poiBatchLayer.container) {
+              map._poiBatchLayer.container.remove();
+            }
+            map._poiBatchLayer = null;
+          }
+        }
+      }
+    },
     update(pois) {
       this.lastPoiData = pois;
       if (!window.poiHijack || !window.poiHijack.activeMaps)
@@ -3658,7 +3751,7 @@ var window = (() => {
       if (new.target === _MapOverlayBase) {
         throw new Error("MapOverlayBase is abstract and cannot be instantiated directly");
       }
-      console.log(`[${this.constructor.name}] Constructor called`);
+      console.log(`[${this.constructor.name}][${new.target.name}] Constructor called`);
       this.debug = debug;
       this.mapInstance = null;
       this.container = null;
@@ -4150,16 +4243,18 @@ var window = (() => {
               `;
                 return div;
               });
-              const color = poi.color || "#ff0000";
-              const secondaryColor = poi.secondaryColor || "#ffffff";
-              const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
-              el.style.backgroundImage = `url('${poi.logoData || svg}')`;
               el.setAttribute("data-id", id);
               el.setAttribute("data-lat", lat);
               el.setAttribute("data-lng", lng);
               self.activeElements.set(id, el);
               fragment.appendChild(el);
             }
+            const color = poi.color || "#ff0000";
+            const secondaryColor = poi.secondaryColor || "#ffffff";
+            const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+            el.style.backgroundImage = `url('${poi.logoData || svg}')`;
+            if (!el.hasAttribute("data-id"))
+              console.log(`[GOOGLE MAPS] Updated color for POI: ${id}, color=${color}`);
             el.style.transform = `translate(-50%, -100%) translate(${Math.round(pos.x)}px, ${Math.round(pos.y)}px)`;
           });
           if (fragment.childElementCount > 0) {
@@ -4183,6 +4278,7 @@ var window = (() => {
      * @param {Object} mapInstance - The map instance
      */
     renderMarkers(pois, mapInstance) {
+      console.log(`[GOOGLE MAPS] renderMarkers called: ${pois.length} POIs, activeElements=${this.activeElements.size}`);
       if (this._nativeMarkersInjected) {
         this.log("Native markers injected (flag set), skipping overlay render");
         return;
@@ -4404,6 +4500,7 @@ var window = (() => {
      * @param {Object} mapInstance - The map instance
      */
     renderMarkers(pois, mapInstance) {
+      console.log(`[MAPBOX] renderMarkers called: ${pois.length} POIs, activeMarkers=${this.activeMarkers.size}`);
       if (this._nativeMarkersInjected) {
         this.log("Native markers injected (flag set), skipping overlay render");
         return;
@@ -4442,6 +4539,16 @@ var window = (() => {
         const id = `${mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`;
         usedIds.add(id);
         if (this.activeMarkers.has(id)) {
+          const marker2 = this.activeMarkers.get(id);
+          const el = marker2.getElement ? marker2.getElement() : null;
+          if (el) {
+            const color = poi.color || "#ff0000";
+            const secondaryColor = poi.secondaryColor || "#ffffff";
+            const logo = poi.logoData;
+            const fallbackSvg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+            el.style.backgroundImage = `url('${logo || fallbackSvg}')`;
+            console.log(`[MAPBOX] Updated marker color: id=${id.substr(-8)}, color=${color}`);
+          }
           return;
         }
         const marker = this.createMarker(poi, mapInstance);

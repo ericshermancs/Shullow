@@ -1,12 +1,16 @@
 /**
  * POI Injector Overlay Module
- * Handles visual rendering of pins, popups, and the debug panel.
+ * Handles popups and the debug panel.
+ * Pin rendering is handled exclusively by the bridge (native map markers).
  */
-const getPinSvg = (color = '#ff0000', secondaryColor = '#ffffff') => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
-<svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="${color}" stroke="${secondaryColor}" stroke-width="1"/>
-</svg>
-`)}`;
+
+const getEffectiveHost = () => {
+  if (window.top === window) return window.location.hostname;
+  try {
+    if (document.referrer) return new URL(document.referrer).hostname;
+  } catch (e) {}
+  return window.location.hostname;
+};
 
 class OverlayManager {
   constructor(container) {
@@ -34,8 +38,7 @@ class OverlayManager {
     this.overlay.style.cssText = `
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       pointer-events: none; z-index: 2147483646; background: transparent;
-      border: 3px dashed rgba(255, 0, 0, 0.1); box-sizing: border-box;
-      overflow: hidden;
+      box-sizing: border-box; overflow: hidden;
     `;
     
     const existingDebug = document.getElementById('poi-debug-panel');
@@ -67,11 +70,14 @@ class OverlayManager {
   updateVisibility() {
     if (!this.overlay || !this.debugPanel) return;
     const pref = window.poiState.preferences;
-    const host = window.location.hostname;
-    const sitePref = pref.sitePreferences?.[host] || { overlayEnabled: true };
+    const host = getEffectiveHost();
+    const sitePref = pref.sitePreferences?.[host] || {};
+    const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+      ? sitePref.siteEnabled
+      : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
     
-    this.overlay.style.display = sitePref.overlayEnabled ? 'block' : 'none';
-    this.debugPanel.style.display = pref.debugEnabled ? 'block' : 'none';
+    this.overlay.style.display = siteEnabled ? 'block' : 'none';
+    this.debugPanel.style.display = (siteEnabled && pref.debugEnabled) ? 'block' : 'none';
     
     this.debugPanel.style.color = pref.accentColor;
     this.debugPanel.style.borderColor = pref.accentColor;
@@ -130,13 +136,14 @@ class OverlayManager {
   updateMapBounds(b) {
     const json = JSON.stringify(b);
     if (json === this.lastBoundsJson) {
-      if (window.poiState.nativeMode) this.updatePopupPosition(); // Update popup even if bounds same (pan?)
+      this.updatePopupPosition();
       this.updateDebug();
       return;
     }
     this.mapBounds = b;
     this.lastBoundsJson = json;
-    this.render();
+    this.updatePopupPosition();
+    this.updateDebug();
   }
 
   updatePopupPosition() {
@@ -203,21 +210,19 @@ class OverlayManager {
      this.hoverTimeout = setTimeout(() => { this.hidePopup(); }, 300);
   }
 
-  load(pois) { this.markerData = pois; this.render(); }
+  load(pois) {
+    this.markerData = pois;
+    this.updateDebug();
+  }
 
   clearMarkers() {
-    if (this.overlay) {
-      this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
-      this.markerData = [];
-      this.hidePopup();
-      this.updateDebug();
-    }
+    this.markerData = [];
+    this.hidePopup();
+    this.updateDebug();
   }
 
   removeMarkersForGroup(groupName) {
-    if (!this.overlay) return;
-    // Use CSS selector to get only markers for this group (much faster than find loop)
-    this.overlay.querySelectorAll(`.poi-marker-overlay[data-group="${groupName}"]`).forEach(m => m.remove());
+    this.markerData = this.markerData.filter(p => p.groupName !== groupName);
     this.updateDebug();
   }
 
@@ -263,138 +268,10 @@ class OverlayManager {
     if (this.hoverTimeout) { clearTimeout(this.hoverTimeout); this.hoverTimeout = null; }
   }
 
-  // Prevent flicker by debouncing render if high frequency, but allow immediate for smooth drag
+  // Pin rendering is handled by the bridge (native map markers).
+  // render() now only updates popup position and debug panel.
   render() {
-    if (!this.overlay || !this.mapBounds || !this.viewportBounds) return;
-    
-    // NATIVE MODE CHECK:
-    // If native markers are active, we clear DOM pins and ONLY manage popups.
-    if (window.poiState.nativeMode) {
-       this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
-       this.updatePopupPosition(); // Keep popup attached if open
-       this.updateDebug();
-       return;
-    }
-    
-    // REDFIN FLICKER FIX:
-    // If popup is active, allow render but DO NOT destroy pins.
-    // Instead, update both pins AND the popup position.
-    
-    const pref = window.poiState.preferences;
-    const host = window.location.hostname;
-    const sitePref = pref.sitePreferences?.[host] || { overlayEnabled: true };
-    if (!sitePref.overlayEnabled) { 
-        this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
-        this.updateDebug(); 
-        return; 
-    }
-
-    const b = this.mapBounds;
-    const w = this.viewportBounds.width;
-    const h = this.viewportBounds.height;
-    const projectY = (lat) => {
-      const sin = Math.sin(lat * Math.PI / 180);
-      return Math.log((1 + sin) / (1 - sin)) / 2;
-    };
-    const minLatProj = projectY(b.south);
-    const maxLatProj = projectY(b.north);
-
-    // OPTIMIZATION: Use cached projection if bounds haven't changed drastically
-    // Although in this render loop, bounds just updated, so we recalculate.
-    // We could hoist the projection function if it was static, but it depends on bounds.
-    
-    // Update active popup position if it exists (DOM READ/WRITE)
-    if (this.activePopup && this.activePopupData) {
-       const pLat = parseFloat(this.activePopupData.poi.latitude);
-       const pLng = parseFloat(this.activePopupData.poi.longitude);
-       
-       if (pLat >= b.south && pLat <= b.north && pLng >= b.west && pLng <= b.east) {
-          const px = ((pLng - b.west) / (b.east - b.west)) * w;
-          const pLatProj = projectY(pLat);
-          const py = ((maxLatProj - pLatProj) / (maxLatProj - minLatProj)) * h;
-          
-          // Batch style updates
-          this.activePopup.style.transform = `translate(-50%, -100%) translate(${px}px, ${py - 42}px)`;
-          this.activePopup.style.left = '0'; 
-          this.activePopup.style.top = '0';
-       } else {
-          this.hidePopup();
-       }
-    }
-
-    // Track existing pins to reuse/diff them
-    const existingPins = new Map();
-    this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => {
-       const id = m.getAttribute('data-poi-id');
-       if (id) existingPins.set(id, m);
-    });
-    
-    const usedPins = new Set();
-    const fragment = document.createDocumentFragment(); // Batch appends
-
-    this.markerData.forEach((poi, index) => {
-      const lat = parseFloat(poi.latitude);
-      const lng = parseFloat(poi.longitude);
-      
-      // Basic bounds check
-      if (lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east) {
-        const poiId = poi.id || `${poi.name}-${lat}-${lng}`;
-        usedPins.add(poiId);
-
-        const x = ((lng - b.west) / (b.east - b.west)) * w;
-        const latProj = projectY(lat);
-        const y = ((maxLatProj - latProj) / (maxLatProj - minLatProj)) * h;
-        
-        let pin = existingPins.get(poiId);
-        
-        if (pin) {
-           // Move existing using translate for performance (avoids layout thrashing vs top/left)
-           pin.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
-           pin.style.left = '0';
-           pin.style.top = '0';
-        } else {
-           // Create new pin
-           pin = document.createElement('div');
-           pin.className = 'poi-marker-overlay';
-           pin.setAttribute('data-poi-id', poiId);
-           pin.setAttribute('data-group', poi.groupName); // Add group attribute for fast filtering
-           const style = pref.groupStyles[poi.groupName] || {};
-           const color = style.color || pref.accentColor || '#ff0000';
-           const secondaryColor = style.secondaryColor || '#ffffff';
-           const logo = style.logoData;
-           
-           // Use translate for positioning
-           pin.style.cssText = `
-             position: absolute; left: 0; top: 0; width: 32px; height: 32px;
-             background-image: url('${logo || getPinSvg(color, secondaryColor)}');
-             background-size: contain; background-repeat: no-repeat;
-             transform: translate(-50%, -100%) translate(${x}px, ${y}px); 
-             pointer-events: auto; cursor: pointer;
-             filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4)); z-index: 1000;
-             transition: transform 0.1s linear; /* Smooth movement using transform */
-             will-change: transform;
-           `;
-
-           // ... (Listeners same as before) ...
-           pin.addEventListener('wheel', (e) => { /* ... */ }, { passive: true });
-           pin.onmouseleave = () => { /* ... */ };
-           pin.onclick = (e) => { e.stopPropagation(); window.postMessage({ type: 'POI_CENTER_MAP', lat, lng }, '*'); };
-           
-           fragment.appendChild(pin);
-        }
-        
-        // ... (Hover listener update) ...
-      }
-    });
-
-    // Bulk append new pins
-    if (fragment.childElementCount > 0) this.overlay.appendChild(fragment);
-
-    // Bulk remove unused
-    existingPins.forEach((pin, id) => {
-       if (!usedPins.has(id)) pin.remove();
-    });
-
+    this.updatePopupPosition();
     this.updateDebug();
   }
 }

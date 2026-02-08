@@ -37,13 +37,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     previews.forEach(p => p.style.background = color);
   };
   const saveData = async () => {
-    console.log('[POI POPUP] saveData called');
     await StorageManager.saveState(preferences, activeGroups);
-    StorageManager.notifyContentScript(activeGroups, preferences);
+    // Note: Do NOT call notifyContentScript here - it should be called from saveConfig with styleChangedGroup
+  };
+  const getSiteEnabled = () => {
+    const sitePref = preferences.sitePreferences?.[currentHost];
+    if (sitePref && typeof sitePref.siteEnabled === 'boolean') return sitePref.siteEnabled;
+    if (sitePref && typeof sitePref.overlayEnabled === 'boolean') return sitePref.overlayEnabled;
+    return true;
   };
   const updateSiteToggle = () => {
-    const sitePref = preferences.sitePreferences[currentHost] || { overlayEnabled: true };
-    overlayToggle.checked = sitePref.overlayEnabled;
+    overlayToggle.checked = getSiteEnabled();
   };
 
   // --- Modal Logic ---
@@ -127,11 +131,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (currentEditingGroup === '__theme__') {
       preferences.accentColor = tempThemeColor;
       applyTheme(tempThemeColor);
+      await saveData();
     } else if (currentEditingGroup) {
       if (!preferences.groupStyles) preferences.groupStyles = {};
       preferences.groupStyles[currentEditingGroup] = { color: tempPriColor, secondaryColor: tempSecColor, logoData: currentLogoData };
+      await saveData();
+      console.log(`[POPUP] saveConfig: group=${currentEditingGroup}, newColor=${tempPriColor}`);
+      StorageManager.notifyContentScript(activeGroups, preferences, currentEditingGroup);
+    } else {
+      await saveData();
     }
-    await saveData();
     await renderGroups();
     hideModal();
     updateStatus('CONFIG SAVED');
@@ -189,9 +198,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Listeners ---
   overlayToggle.addEventListener('change', (e) => {
     if (!preferences.sitePreferences) preferences.sitePreferences = {};
-    preferences.sitePreferences[currentHost] = { overlayEnabled: e.target.checked };
+    const enabled = e.target.checked;
+    const existing = preferences.sitePreferences[currentHost] || {};
+    preferences.sitePreferences[currentHost] = { ...existing, siteEnabled: enabled, overlayEnabled: enabled };
     saveData();
-    updateStatus(e.target.checked ? 'OVERLAY ON' : 'OVERLAY OFF');
+    StorageManager.notifyTabsForHost(currentHost, {
+      action: 'toggle-site-enabled',
+      enabled,
+      host: currentHost
+    });
+    updateStatus(enabled ? 'SITE ON' : 'SITE OFF');
   });
 
   debugToggle.addEventListener('change', (e) => {

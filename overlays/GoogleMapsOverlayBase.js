@@ -286,12 +286,6 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
               return div;
             });
 
-            // Update visual content
-            const color = poi.color || '#ff0000';
-            const secondaryColor = poi.secondaryColor || '#ffffff';
-            const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
-            el.style.backgroundImage = `url('${poi.logoData || svg}')`;
-
             // Store data attributes for delegation
             el.setAttribute('data-id', id);
             el.setAttribute('data-lat', lat);
@@ -301,7 +295,12 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
             fragment.appendChild(el);
           }
 
-          // Update position using transform (faster than top/left)
+          // Always update visual content (color may have changed)
+          const color = poi.color || '#ff0000';
+          const secondaryColor = poi.secondaryColor || '#ffffff';
+          const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+          el.style.backgroundImage = `url('${poi.logoData || svg}')`;
+          if (!el.hasAttribute('data-id')) console.log(`[GOOGLE MAPS] Updated color for POI: ${id}, color=${color}`);
           el.style.transform = `translate(-50%, -100%) translate(${Math.round(pos.x)}px, ${Math.round(pos.y)}px)`;
         });
 
@@ -331,6 +330,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    console.log(`[GOOGLE MAPS] renderMarkers called: ${pois.length} POIs, activeElements=${this.activeElements.size}`);
     // CRITICAL: Check native marker flag FIRST before any other logic
     // This prevents re-rendering after native markers are detected
     if (this._nativeMarkersInjected) {

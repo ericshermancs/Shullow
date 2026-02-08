@@ -165,6 +165,7 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
+    console.log(`[MAPBOX] renderMarkers called: ${pois.length} POIs, activeMarkers=${this.activeMarkers.size}`);
     // CRITICAL: Check native marker flag FIRST before any other logic
     // This prevents re-rendering after native markers are detected
     if (this._nativeMarkersInjected) {
@@ -217,8 +218,18 @@ class MapboxOverlayBase extends MapOverlayBase {
       const id = `${mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`;
       usedIds.add(id);
 
-      // Skip if marker already exists
+      // Update existing marker's color if it changed
       if (this.activeMarkers.has(id)) {
+        const marker = this.activeMarkers.get(id);
+        const el = marker.getElement ? marker.getElement() : null;
+        if (el) {
+          const color = poi.color || '#ff0000';
+          const secondaryColor = poi.secondaryColor || '#ffffff';
+          const logo = poi.logoData;
+          const fallbackSvg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+          el.style.backgroundImage = `url('${logo || fallbackSvg}')`;
+          console.log(`[MAPBOX] Updated marker color: id=${id.substr(-8)}, color=${color}`);
+        }
         return;
       }
 
