@@ -49,7 +49,7 @@ class MapHijackManager extends ManagerBase {
    */
   attachListeners(instance) {
     if (!instance || instance._poiListener) return;
-    console.log('[POI TITAN] Attaching listeners to captured instance');
+    console.log('[Shullow] Attaching listeners to captured instance');
     
     // Unwrap if it's a wrapper (Redfin specific)
     let target = instance;
@@ -89,7 +89,7 @@ class MapHijackManager extends ManagerBase {
         instance._poiListener = true; // Mark original instance as processed
       } else if (target.addListener) { // Google Maps
         const update = () => {
-          // console.log('[POI TITAN] Google Maps event fired');
+          // console.log('[Shullow] Google Maps event fired');
           if (typeof target.getBounds === 'function') {
             const b = target.getBounds();
             // Google Maps getBounds returns LatLngBounds
@@ -111,7 +111,7 @@ class MapHijackManager extends ManagerBase {
         instance._poiListener = true; // Mark original instance as processed
       }
     } catch(e) {
-       console.error('[POI TITAN] Failed to attach listeners', e);
+      console.error('[Shullow] Failed to attach listeners', e);
     }
   }
 
@@ -251,7 +251,7 @@ class MapHijackManager extends ManagerBase {
                    // Use window.poiHijack.activeMaps directly to avoid scope issues
                    if (this && typeof this.getDiv === 'function' && typeof this.getBounds === 'function') {
                       if (window.poiHijack && window.poiHijack.activeMaps && !window.poiHijack.activeMaps.has(this)) {
-                         console.log('[POI TITAN] Backdoor capture via', method);
+                         console.log('[Shullow] Backdoor capture via', method);
                          window.poiHijack.activeMaps.add(this);
                          window.poiHijack.attachListeners(this);
                       }
