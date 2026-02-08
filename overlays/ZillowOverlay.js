@@ -2,17 +2,8 @@
  * ZillowOverlay - Site-specific overlay for Zillow.com
  * 
  * Zillow uses Mapbox GL JS for their maps.
- * This overlay extends MapboxOverlayBase with Zillow-specific
- * detection and z-index handling.
- */
-
-/**
- * ZillowOverlay - Mapbox-based overlay for Zillow.com
- * 
- * Features:
- * - Detects Zillow's Mapbox map container
- * - Applies proper z-index for marker visibility
- * - Handles Zillow's specific DOM structure
+ * Rendering is handled entirely by bridge/modules/renderer.js (poi-native-marker).
+ * This class provides domain detection for the OverlayRegistry.
  */
 class ZillowOverlay extends MapboxOverlayBase {
   constructor(debug = false) {
@@ -26,7 +17,6 @@ class ZillowOverlay extends MapboxOverlayBase {
    * @returns {HTMLElement|null} The map container element
    */
   detect() {
-    // Zillow's map containers
     const selectors = [
       '.mapboxgl-map',
       '#search-page-map',
@@ -45,30 +35,6 @@ class ZillowOverlay extends MapboxOverlayBase {
     }
 
     return null;
-  }
-
-  /**
-   * @override
-   * Gets the z-index for markers (higher for Zillow to ensure visibility)
-   * @returns {number} The z-index value
-   */
-  getMarkerZIndex() {
-    return 10;
-  }
-
-  /**
-   * @override
-   * Creates a marker element with Zillow-specific styling
-   * @param {Object} poi - POI object
-   * @returns {HTMLElement} The marker element
-   */
-  createMarkerElement(poi) {
-    const el = super.createMarkerElement(poi);
-    
-    // Zillow-specific: ensure markers are above Zillow's UI
-    el.style.zIndex = '10';
-    
-    return el;
   }
 }
 

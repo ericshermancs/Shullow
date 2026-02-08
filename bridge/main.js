@@ -5,8 +5,11 @@
  * Event-driven architecture:
  * - Bridge starts immediately on script load
  * - Announces readiness via POI_BRIDGE_READY → content script responds with POI data
- * - Listens for POI_DATA_UPDATE from content script → renders via overlay registry
+ * - Listens for POI_DATA_UPDATE from content script → renders via poiRenderer (native markers)
  * - Loop continuously re-renders from cached POI data for any newly discovered maps
+ * 
+ * Rendering: ALL rendering goes through window.poiRenderer (poi-native-marker).
+ * Overlay classes handle domain detection, bounds tracking, and site-specific hijack logic only.
  */
 (function() {
   const PREFIX = '[BRIDGE] ';
@@ -49,9 +52,7 @@
     // Log heartbeat every 20 iterations (10 seconds)
     if (loopCount % 20 === 0) {
       const maps = window.poiHijack ? window.poiHijack.activeMaps.size : '?';
-      const overlays = (window.overlayRegistry && window.overlayRegistry.getActiveEntries) 
-        ? window.overlayRegistry.getActiveEntries().length : '?';
-      console.log(`${PREFIX}heartbeat #${loopCount}: maps=${maps}, overlays=${overlays}, cachedPois=${lastReceivedPois.length}`);
+      console.log(`${PREFIX}heartbeat #${loopCount}: maps=${maps}, cachedPois=${lastReceivedPois.length}`);
     }
 
     // 1. Dependency Guard
@@ -64,7 +65,7 @@
       return;
     }
 
-    // 2. Initialize Registry (once)
+    // 2. Initialize Registry (once) — still used for domain detection & bounds tracking
     initializeRegistry();
     
     // 3. RE-HIJACK: Try to hijack Google Maps if it loaded after initial attempt
@@ -108,19 +109,10 @@
         }
       }
       
-      // 7. Continuous re-render from cached POI data
-      // This ensures overlays that were registered AFTER the initial POI_DATA_UPDATE
-      // still get rendered. The overlay's renderMarkers() is idempotent.
-      if (window.overlayRegistry && lastReceivedPois.length > 0) {
-        const activeEntries = window.overlayRegistry.getActiveEntries();
-        for (const entry of activeEntries) {
-          if (entry.overlay && entry.mapInstance) {
-            entry.overlay.renderMarkers(lastReceivedPois, entry.mapInstance);
-          }
-        }
-      } else if (window.poiRenderer && window.poiRenderer.lastPoiData.length > 0) {
-        // Legacy fallback: use renderer directly if registry has no active entries
-        window.poiRenderer.update(window.poiRenderer.lastPoiData);
+      // 7. Continuous re-render via native renderer
+      // poiRenderer iterates poiHijack.activeMaps directly — the sole rendering path.
+      if (window.poiRenderer && lastReceivedPois.length > 0) {
+        window.poiRenderer.update(lastReceivedPois);
       }
     } catch(e) {
       console.error(PREFIX + 'Loop error:', e);
@@ -145,18 +137,7 @@
        console.log(`${PREFIX}POI_DATA_UPDATE received: ${event.data.pois.length} POIs`);
        lastReceivedPois = event.data.pois;
 
-       // Route to registry-based overlays first
-       if (window.overlayRegistry) {
-          const entries = window.overlayRegistry.getActiveEntries();
-          console.log(`${PREFIX}Routing to ${entries.length} active overlays`);
-          for (const entry of entries) {
-            if (entry.overlay && entry.mapInstance) {
-              entry.overlay.renderMarkers(event.data.pois, entry.mapInstance);
-            }
-          }
-       }
-
-       // Legacy fallback: always feed renderer if available
+       // Render via native renderer — the sole rendering path
        if (window.poiRenderer) {
           window.poiRenderer.update(event.data.pois);
        }

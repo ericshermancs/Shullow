@@ -1,9 +1,9 @@
 /**
  * MapOverlayBase - Base class for all site-specific map overlays
  * 
- * This abstract base class provides the foundation for rendering POI markers
- * on different mapping platforms (Google Maps, Mapbox, etc.). Site-specific
- * overlays should extend this class and implement the abstract methods.
+ * This abstract base class provides the foundation for domain detection,
+ * map compatibility checks, and bounds tracking for the OverlayRegistry.
+ * Rendering is handled entirely by bridge/modules/renderer.js (poi-native-marker).
  * 
  * @abstract
  */
@@ -23,8 +23,6 @@ class MapOverlayBase {
     this.mapInstance = null;
     this.container = null;
     this.isActive = false;
-    this.pois = [];
-    this.markers = new Map(); // id -> marker instance
     this.mapId = null; // Unique identifier for this map instance
     this.domain = null; // Domain this overlay was instantiated for
     this.detectedAt = null; // Timestamp when map was detected
@@ -71,55 +69,6 @@ class MapOverlayBase {
     throw new Error('Must implement isCompatibleMap(mapInstance)');
   }
 
-  /**
-   * Renders markers for the given POIs on the map
-   * @abstract
-   * @param {Array} pois - Array of POI objects with latitude, longitude, and metadata
-   * @param {Object} mapInstance - The map instance to render on
-   */
-  renderMarkers(pois, mapInstance) {
-    throw new Error('Must implement renderMarkers(pois, mapInstance)');
-  }
-
-  /**
-   * Creates a single marker for a POI
-   * @abstract
-   * @param {Object} poi - POI object with latitude, longitude, and metadata
-   * @param {Object} map - The map instance
-   * @returns {Object} The created marker instance
-   */
-  createMarker(poi, map) {
-    throw new Error('Must implement createMarker(poi, map)');
-  }
-
-  // ============================================
-  // Optional Override Methods
-  // ============================================
-
-  /**
-   * Updates an existing marker with new POI data
-   * Override in subclass if needed
-   * @param {Object} marker - The marker instance to update
-   * @param {Object} poi - Updated POI data
-   */
-  updateMarker(marker, poi) {
-    // Default: no-op, subclasses can override
-  }
-
-  /**
-   * Removes a marker from the map
-   * Override in subclass if needed
-   * @param {Object} marker - The marker instance to remove
-   */
-  removeMarker(marker) {
-    // Default implementation - subclasses should override for proper cleanup
-    if (marker && marker.remove) {
-      marker.remove();
-    } else if (marker && marker.setMap) {
-      marker.setMap(null);
-    }
-  }
-
   // ============================================
   // Core Lifecycle Methods
   // ============================================
@@ -150,44 +99,10 @@ class MapOverlayBase {
   }
 
   /**
-   * Inserts POI markers into the map
-   * This is the main entry point called by the system
-   * @param {Array} pois - Array of POI objects
-   */
-  insert(pois) {
-    if (!this.mapInstance) {
-      this.log('insert() called but no map instance available');
-      return;
-    }
-
-    if (!Array.isArray(pois)) {
-      this.log('insert() called with non-array pois');
-      return;
-    }
-
-    this.pois = pois;
-    this.renderMarkers(pois, this.mapInstance);
-  }
-
-  /**
-   * Legacy render method - now delegates to renderMarkers
-   * @deprecated Use insert() or renderMarkers() instead
-   */
-  render() {
-    if (this.pois.length > 0 && this.mapInstance) {
-      this.renderMarkers(this.pois, this.mapInstance);
-    }
-  }
-
-  /**
-   * Clears all markers from the map
+   * Clears overlay state (no rendering to clear — handled by renderer.js)
    */
   clear() {
-    this.markers.forEach((marker, id) => {
-      this.removeMarker(marker);
-    });
-    this.markers.clear();
-    this.log('All markers cleared');
+    this.log('Clear called');
   }
 
   /**
@@ -198,7 +113,6 @@ class MapOverlayBase {
     this.mapInstance = null;
     this.container = null;
     this.isActive = false;
-    this.pois = [];
     this.log('Overlay cleaned up');
   }
 
@@ -237,71 +151,6 @@ class MapOverlayBase {
     }
 
     return null;
-  }
-
-  /**
-   * Checks if the extension has already rendered a marker for this POI
-   * Always returns false — the extension is the sole rendering system,
-   * so its own markers should never block re-renders.
-   * @param {Object} poi - POI object
-   * @returns {boolean} Always false
-   * @protected
-   */
-  _hasExtensionMarker(poi) {
-    // The extension is the sole rendering system — our own markers should not
-    // block re-renders. Site-native markers are caught by _hasSiteNativeMarker().
-    return false;
-  }
-
-  /**
-   * Checks if the site has already placed a native marker for this POI
-   * Used to skip rendering if site's own pins are visible
-   * Should be overridden by subclasses for site-specific detection
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if site native marker exists
-   * @protected
-   */
-  _hasSiteNativeMarker(poi) {
-    // Base class: no site-specific markers to check
-    // Subclasses should override this method for site-specific detection
-    return false;
-  }
-
-  /**
-   * Checks if a marker (extension or site) already exists for this POI
-   * Combines both extension and site marker checks
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if any marker exists
-   */
-  _hasNativeMarker(poi) {
-    if (typeof this._hasLoggedSiteMarker === 'undefined') {
-      this._hasLoggedSiteMarker = false;
-    }
-    
-    // Check if site has its own native marker
-    if (this._hasSiteNativeMarker(poi)) {
-      if (!this._hasLoggedSiteMarker) {
-        this.log('Site native marker detected, skipping overlay render');
-        this._hasLoggedSiteMarker = true;
-      }
-      return true;
-    }
-    
-    // Check if extension already rendered this marker
-    if (this._hasExtensionMarker(poi)) {
-      return true;
-    }
-    
-    return false;
-  }
-
-  /**
-   * Filters POIs to exclude those with native markers (site or extension)
-   * @param {Array} pois - Array of POI objects
-   * @returns {Array} Filtered POIs
-   */
-  _filterNativePois(pois) {
-    return pois.filter(poi => !this._hasNativeMarker(poi));
   }
 
   /**
