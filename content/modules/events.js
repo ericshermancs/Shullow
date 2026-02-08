@@ -60,8 +60,14 @@
     }
 
     if (msg.action === 'toggle-site-enabled') {
-      // Site enable/disable from popup - just respond, storage change will handle the rest
-      resp({ status: 'ok' });
+      const state = getState();
+      if (state) {
+        if (msg.preferences) state.preferences = msg.preferences;
+        state._skipStorageRead = false; // Force storage read to get latest siteEnabled
+        state.refresh().then(() => resp({ status: 'ok' }));
+      } else {
+        resp({ status: 'no-state' });
+      }
       return true;
     }
 

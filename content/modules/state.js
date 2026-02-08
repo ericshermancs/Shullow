@@ -158,6 +158,20 @@ class POIStateManager {
       // Update manager visibility
       window.manager?.updateVisibility();
 
+      // Check if site is disabled — if so, clear all POIs from bridge + manager
+      const host = window.location.hostname;
+      const sitePref = this._preferences.sitePreferences?.[host] || {};
+      const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+        ? sitePref.siteEnabled
+        : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+
+      if (!siteEnabled) {
+        console.log('[STATE] Site is disabled, clearing all POIs');
+        this._clearAllPOIs();
+        this._lastActiveGroups = { ...this._activeGroups };
+        return;
+      }
+
       const selected = Object.keys(this._activeGroups).filter(k => this._activeGroups[k]);
       const lastSelected = Object.keys(this._lastActiveGroups).filter(k => this._lastActiveGroups[k]);
       const removed = lastSelected.filter(g => !selected.includes(g));
