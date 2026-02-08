@@ -32,10 +32,6 @@ class POIStateManager {
       groupStyles: {},
       accentColor: '#d1ff00'
     };
-    this._nativeMode = false;
-    this._globalBounds = null;
-    this._globalMethod = 'searching...';
-    this._lastMessageTime = 0;
     this._initialized = false;
     
     // Cache for POI data to avoid slow storage reads
@@ -53,6 +49,11 @@ class POIStateManager {
     
     // Track last POIs sent to bridge for quick filtering
     this._bridgeLastPois = [];
+
+    // Bridge state (set by events.js from bridge messages)
+    this._globalBounds = null;
+    this._globalMethod = 'searching...';
+    this._lastMessageTime = 0;
   }
 
   // Getters and Setters for backwards compatibility
@@ -61,9 +62,6 @@ class POIStateManager {
 
   get preferences() { return this._preferences; }
   set preferences(val) { this._preferences = val; }
-
-  get nativeMode() { return this._nativeMode; }
-  set nativeMode(val) { this._nativeMode = val; }
 
   get globalBounds() { return this._globalBounds; }
   set globalBounds(val) { this._globalBounds = val; }
@@ -151,21 +149,43 @@ class POIStateManager {
       
       // Update state from storage if needed
       if (!this._skipStorageRead) {
-        const state = await chrome.storage.local.get(['activeGroups', 'preferences']);
-        if (state.activeGroups) this._activeGroups = state.activeGroups;
-        if (state.preferences) this._preferences = { ...this._preferences, ...state.preferences };
+        try {
+          const state = await chrome.storage.local.get(['activeGroups', 'preferences']);
+          if (state.activeGroups) this._activeGroups = state.activeGroups;
+          if (state.preferences) this._preferences = { ...this._preferences, ...state.preferences };
+        } catch (e) {
+          // Extension context invalidated (reload/update) - use cached state
+          console.warn('[STATE] Extension context invalidated, using cached state');
+        }
       }
       this._skipStorageRead = false;
 
       // Update manager visibility
       window.manager?.updateVisibility();
 
+      // Check if site is disabled — if so, clear all POIs from bridge + manager
+      const host = window.location.hostname;
+      const sitePref = this._preferences.sitePreferences?.[host] || {};
+      const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+        ? sitePref.siteEnabled
+        : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+
+      if (!siteEnabled) {
+        console.log('[STATE] Site is disabled, clearing all POIs');
+        this._clearAllPOIs();
+        this._lastActiveGroups = { ...this._activeGroups };
+        return;
+      }
+
       const selected = Object.keys(this._activeGroups).filter(k => this._activeGroups[k]);
       const lastSelected = Object.keys(this._lastActiveGroups).filter(k => this._lastActiveGroups[k]);
       const removed = lastSelected.filter(g => !selected.includes(g));
       
+      console.log(`[STATE] refresh(): selected=${JSON.stringify(selected)}, lastSelected=${JSON.stringify(lastSelected)}, removed=${JSON.stringify(removed)}, activeGroups=${JSON.stringify(this._activeGroups)}`);
+      
       // Handle empty selection - clear all
       if (selected.length === 0) {
+        console.log('[STATE] No active groups selected, clearing all POIs');
         this._clearAllPOIs();
         this._lastActiveGroups = { ...this._activeGroups };
         return;
@@ -240,7 +260,8 @@ class POIStateManager {
           longitude: p.longitude,
           color,
           secondaryColor,
-          logoData
+          logoData,
+          groupName: g
         });
       });
     });

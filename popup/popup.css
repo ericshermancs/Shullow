@@ -515,6 +515,7 @@ canvas {
 }
 
 .logo-preview {
+  position: relative;
   width: 64px;
   height: 64px;
   margin-top: 8px;
@@ -525,6 +526,30 @@ canvas {
   justify-content: center;
   background: rgba(0,0,0,0.2);
   overflow: hidden;
+}
+
+.logo-delete-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 60, 60, 0.85);
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-delete-btn:hover {
+  background: #ff2020;
 }
 
 .logo-preview img {

@@ -3,21 +3,12 @@
  * 
  * Redfin uses Google Maps and has specialized data extraction methods:
  * - Redux store subscription for real-time bounds updates
- * - window.RF_CONTEXT / window.__map_bounds__ global variable scraping
+ * - window.__map_bounds__ global variable scraping
  * - Redfin API response parsing
  * 
- * This overlay extends GoogleMapsOverlayBase with all Redfin-specific
- * logic that was previously in discovery.js and sniff.js.
- */
-
-/**
- * RedfinOverlay - Google Maps overlay for Redfin.com
- * 
- * Features:
- * - Redux store subscription for real-time bounds
- * - Global variable scraping (RF_CONTEXT, __map_bounds__)
- * - API response parsing
- * - Integrated bounds extraction
+ * Rendering is handled entirely by bridge/modules/renderer.js (poi-native-marker).
+ * This class provides domain detection, Redux store subscription, and
+ * global bounds extraction for the OverlayRegistry.
  */
 class RedfinOverlay extends GoogleMapsOverlayBase {
   constructor(debug = false) {
@@ -26,131 +17,6 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
     this.reduxStore = null;
     this.reduxUnsubscribe = null;
     this._storeSubscribed = false;
-    
-    // Start more aggressive polling for Redfin (100ms instead of 250ms)
-    // Redfin's pushpins appear very quickly and we need to catch them
-    this._startAggressiveNativeMarkerPolling();
-  }
-
-  /**
-   * Starts aggressive polling (100ms) specifically for Redfin
-   * Redfin renders pushpins very quickly so we need faster detection
-   * @private
-   */
-  _startAggressiveNativeMarkerPolling() {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-      console.log('[RedfinOverlay] Cannot start aggressive polling: window or document undefined');
-      return;
-    }
-    if (this._aggressivePollInterval) {
-      console.log('[RedfinOverlay] Aggressive polling already running');
-      return;
-    }
-    
-    console.log('[RedfinOverlay] Starting aggressive native marker polling (100ms)...');
-    this.log('Starting aggressive native marker polling (100ms) for Redfin...');
-    let lastDetectedCount = 0;
-    
-    this._aggressivePollInterval = setInterval(() => {
-      try {
-        if (this._nativeMarkersInjected) {
-          console.log('[RedfinOverlay] Native markers already injected, stopping aggressive polling');
-          this._stopAggressiveNativeMarkerPolling();
-          return;
-        }
-        
-        const selector = this._getNativeMarkerSelector();
-        if (!selector) return;
-        
-        const nativeMarkers = document.querySelectorAll(selector);
-        const count = nativeMarkers.length;
-        
-        if (count > 0 && lastDetectedCount === 0) {
-          this._nativeMarkersInjected = true;
-          console.log(`[RedfinOverlay] Native markers detected by aggressive polling (${count} found)`);
-          this.log(`Redfin native markers detected by aggressive polling (${count} found), immediately clearing overlay`);
-          this.clear();
-          this._stopAggressiveNativeMarkerPolling();
-        }
-        lastDetectedCount = count;
-      } catch (e) {
-        console.error('[RedfinOverlay] Error during aggressive native marker polling:', e);
-        this.log('Error during aggressive native marker polling:', e);
-      }
-    }, 100); // Poll every 100ms (vs 250ms in base class)
-  }
-
-  /**
-   * Stops aggressive polling
-   * @private
-   */
-  _stopAggressiveNativeMarkerPolling() {
-    if (this._aggressivePollInterval) {
-      console.log('[RedfinOverlay] Stopping aggressive polling');
-      clearInterval(this._aggressivePollInterval);
-      this._aggressivePollInterval = null;
-    }
-  }
-
-  /**
-   * @override
-   * Gets the CSS selector for Redfin native markers
-   * Returns multiple selectors with increasing specificity to catch all variations
-   * @returns {string} CSS selector for Redfin pushpins
-   * @protected
-   */
-  _getNativeMarkerSelector() {
-    // Return selector for all possible Redfin marker patterns
-    return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"], .Pushpin[class*="Pushpin"], [aria-label*="home"]';
-  }
-
-  /**
-   * @override
-   * Checks if Redfin has already placed a native marker for this POI
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if Redfin native marker exists
-   */
-  _hasSiteNativeMarker(poi) {
-    if (typeof this._hasLoggedRedfinMarker === 'undefined') {
-      this._hasLoggedRedfinMarker = false;
-    }
-    
-    // Check for Redfin pushpin with matching coordinates
-    // Try exact match first
-    const lat = String(poi.latitude).trim();
-    const lng = String(poi.longitude).trim();
-    
-    // Query for exact match
-    let selector = `.Pushpin.homePushpin[data-latitude="${lat}"][data-longitude="${lng}"]`;
-    let found = !!document.querySelector(selector);
-    
-    // If exact match fails, try with more flexible matching
-    // Get all Redfin pushpins and check their data attributes
-    if (!found) {
-      const pushpins = document.querySelectorAll('.Pushpin.homePushpin');
-      for (const pin of pushpins) {
-        const pinLat = pin.getAttribute('data-latitude');
-        const pinLng = pin.getAttribute('data-longitude');
-        
-        // Compare with tolerance for floating point differences
-        if (pinLat && pinLng) {
-          const latDiff = Math.abs(parseFloat(lat) - parseFloat(pinLat));
-          const lngDiff = Math.abs(parseFloat(lng) - parseFloat(pinLng));
-          
-          // Allow 0.00001 degrees tolerance (~1 meter)
-          if (latDiff < 0.00001 && lngDiff < 0.00001) {
-            found = true;
-            break;
-          }
-        }
-      }
-    }
-    
-    if (found && !this._hasLoggedRedfinMarker) {
-      this.log('Redfin native marker detected');
-      this._hasLoggedRedfinMarker = true;
-    }
-    return found;
   }
 
   /**
@@ -296,7 +162,6 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
    */
   parseNetworkBounds(data) {
     try {
-      // Look for Redfin specific response structure
       if (data?.payload?.viewport) return data.payload.viewport;
       if (data?.payload?.bounds) return data.payload.bounds;
     } catch (e) {
@@ -322,8 +187,6 @@ class RedfinOverlay extends GoogleMapsOverlayBase {
    * Cleanup resources
    */
   cleanup() {
-    this._stopAggressiveNativeMarkerPolling();
-    
     if (this.reduxUnsubscribe) {
       try {
         this.reduxUnsubscribe();

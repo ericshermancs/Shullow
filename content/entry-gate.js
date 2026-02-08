@@ -1,8 +1,14 @@
 /**
  * POI Entry Gate (document_start)
  * Decides whether to inject bridge bundle for this subdomain.
+ * Only injects in the top-level frame — maps are always in the main document.
  */
 (function() {
+  // Skip iframes — the bridge only needs to run in the top-level frame
+  // where the map lives. Running in iframes wastes resources and causes
+  // confusing "0 active overlays" logs from frames without maps.
+  if (window !== window.top) return;
+
   const getEffectiveHost = () => {
     if (window.top === window) return window.location.hostname;
     try {

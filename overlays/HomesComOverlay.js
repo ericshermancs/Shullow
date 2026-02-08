@@ -2,79 +2,15 @@
  * HomesComOverlay - Site-specific overlay for Homes.com
  * 
  * Homes.com uses Google Maps with Web Components (Shadow DOM).
- * This overlay extends GoogleMapsOverlayBase with Homes.com-specific
- * Shadow DOM detection.
+ * Rendering is handled entirely by bridge/modules/renderer.js (poi-native-marker).
+ * This class provides domain detection, Shadow DOM traversal, and
+ * Web Component unwrapping for the OverlayRegistry.
  */
 
-/**
- * HomesComOverlay - Google Maps overlay for Homes.com
- * 
- * Features:
- * - Detects Google Maps within Shadow DOM
- * - Handles gmp-map and gmp-advanced-marker elements
- * - Traverses Shadow DOM to find map instances
- */
 class HomesComOverlay extends GoogleMapsOverlayBase {
   constructor(debug = false) {
     super(debug);
     this.siteId = 'homes.com';
-  }
-
-  /**
-   * @override
-   * Gets the CSS selector for Homes.com/Apartments.com native markers
-   * @returns {string} CSS selector for custom markers
-   * @protected
-   */
-  _getNativeMarkerSelector() {
-    return '.custom-marker.gmaps-adv-marker';
-  }
-
-  /**
-   * @override
-   * Checks if Homes.com has already placed a native marker for this POI
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if Homes.com native marker exists
-   */
-  _hasSiteNativeMarker(poi) {
-    if (typeof this._hasLoggedHomesMarker === 'undefined') {
-      this._hasLoggedHomesMarker = false;
-    }
-    
-    // Check for Homes.com custom marker with matching coordinates
-    const lat = String(poi.latitude).trim();
-    const lng = String(poi.longitude).trim();
-    const coord = `${lat},${lng}`;
-    
-    // Query for exact match first
-    let selector = `.custom-marker.gmaps-adv-marker[data-cuscor="${coord}"]`;
-    let found = !!document.querySelector(selector);
-    
-    // If exact match fails, try with flexible matching
-    // Get all custom markers and check their data-cuscor attributes
-    if (!found) {
-      const markers = document.querySelectorAll('.custom-marker.gmaps-adv-marker');
-      for (const marker of markers) {
-        const cuscor = marker.getAttribute('data-cuscor');
-        if (cuscor) {
-          const [markerLat, markerLng] = cuscor.split(',').map(s => parseFloat(s.trim()));
-          const latDiff = Math.abs(parseFloat(lat) - markerLat);
-          const lngDiff = Math.abs(parseFloat(lng) - markerLng);
-          
-          // Allow 0.00001 degrees tolerance (~1 meter)
-          if (latDiff < 0.00001 && lngDiff < 0.00001) {
-            found = true;
-            break;
-          }
-        }
-      }
-    }
-    
-    if (found && !this._hasLoggedHomesMarker) {
-      this.log('Homes.com native marker detected');
-      this._hasLoggedHomesMarker = true;
-    }
-    return found;
   }
 
   /**
@@ -101,14 +37,6 @@ class HomesComOverlay extends GoogleMapsOverlayBase {
       }
     } catch(e) {}
     return found;
-  }
-
-  /**
-   * Checks if a native marker for this POI exists in the DOM
-   * Uses base class implementation
-   */
-  _hasNativeMarker(poi) {
-    return super._hasNativeMarker(poi);
   }
 
   /**

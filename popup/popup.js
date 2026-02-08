@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   const saveData = async () => {
     await StorageManager.saveState(preferences, activeGroups);
-    // Note: Do NOT call notifyContentScript here - it should be called from saveConfig with styleChangedGroup
+    StorageManager.notifyContentScript(activeGroups, preferences);
   };
   const getSiteEnabled = () => {
     const sitePref = preferences.sitePreferences?.[currentHost];
@@ -103,7 +103,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   const updateLogoPreview = (data) => {
-    logoPreview.innerHTML = data ? `<img src="${data}" alt="Logo">` : '<span style="font-size: 0.5rem; color: #444;">NO LOGO</span>';
+    if (data) {
+      logoPreview.innerHTML = `<img src="${data}" alt="Logo"><button class="logo-delete-btn" title="Remove logo">&times;</button>`;
+      logoPreview.querySelector('.logo-delete-btn').onclick = (e) => {
+        e.stopPropagation();
+        currentLogoData = null;
+        logoInput.value = '';
+        updateLogoPreview(null);
+      };
+    } else {
+      logoPreview.innerHTML = '<span style="font-size: 0.5rem; color: #444;">NO LOGO</span>';
+    }
   };
 
   const handleImageUpload = async (file) => {

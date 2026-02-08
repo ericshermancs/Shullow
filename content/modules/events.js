@@ -1,272 +1,189 @@
 /**
  * POI Injector Events Module
- * Handles message passing and storage synchronization.
+ * Central event coordination hub — all event-driven communication flows through here.
+ * 
+ * Event sources:
+ * 1. Popup → Content: chrome.runtime.onMessage (update-active-groups, refresh-pois)
+ * 2. Storage changes: chrome.storage.onChanged (cross-tab sync)
+ * 3. Bridge → Content: window.postMessage (POI_BRIDGE_READY, POI_BOUNDS_UPDATE, marker events)
  */
 (function() {
-  const getEffectiveHost = () => {
-    if (window.top === window) return window.location.hostname;
-    try {
-      if (document.referrer) return new URL(document.referrer).hostname;
-    } catch (e) {}
-    return window.location.hostname;
-  };
-  const host = getEffectiveHost();
-  let lastMessageUpdate = 0; // Track last message-based update to prevent double refresh
-  let storageRefreshPending = false; // Debounce storage listener refreshes
-  let storageRefreshTimer = null;
-  let fullListenersRegistered = false;
-  let messageListener = null;
-  let storageListener = null;
-  let windowMessageListener = null;
+  // Skip iframes
+  if (window !== window.top) return;
 
-  const getSiteEnabledFromPrefs = (preferences) => {
-    const sitePref = preferences?.sitePreferences?.[host];
-    if (sitePref && typeof sitePref.siteEnabled === 'boolean') return sitePref.siteEnabled;
-    if (sitePref && typeof sitePref.overlayEnabled === 'boolean') return sitePref.overlayEnabled;
-    return true;
-  };
-
-  const getController = () => {
-    if (!window.__poiController) {
-      window.__poiController = {
-        enabled: false,
-        start() {},
-        stop() {},
-        injectBridgeBundle() {},
-        enableBridge() {},
-        disableBridge() {}
-      };
-    }
-    return window.__poiController;
-  };
-  
-  // Check if listener is already registered
-  if (window.__poiEventsListenerRegistered) {
-    return;
-  }
+  // Prevent double registration
+  if (window.__poiEventsListenerRegistered) return;
   window.__poiEventsListenerRegistered = true;
 
-  // 1. Minimal Message Listener (toggle only)
+  const getState = () => {
+    return window.getPoiStateManager ? window.getPoiStateManager() : window.poiState;
+  };
+
+  let lastMessageUpdate = 0;
+  let storageRefreshTimer = null;
+
+  // ─── 1. Chrome Runtime Messages (from Popup) ────────────────────────
   chrome.runtime.onMessage.addListener((msg, sender, resp) => {
-    if (msg.action === 'toggle-site-enabled') {
-      if (msg.host && msg.host !== host) {
-        resp({ status: 'ignored' });
+    if (msg.action === 'update-active-groups' || msg.action === 'refresh-pois') {
+      const state = getState();
+      if (!state) {
+        resp({ status: 'no-state' });
         return true;
       }
-      const controller = getController();
-      if (msg.enabled) {
-        controller.start();
-        registerFullListeners();
+
+      if (msg.activeGroups) state.activeGroups = msg.activeGroups;
+      if (msg.preferences) state.preferences = msg.preferences;
+      lastMessageUpdate = Date.now();
+      state._skipStorageRead = true;
+      if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+
+      const styleChanged = !!(msg.preferences && msg.preferences.groupStyles);
+      const styleChangedGroup = msg.styleChangedGroup || null;
+
+      // If style changed for an active group, do remove-then-readd to force re-render
+      if (styleChanged && styleChangedGroup && state.activeGroups[styleChangedGroup]) {
+        const wasActive = state.activeGroups[styleChangedGroup];
+        state.activeGroups[styleChangedGroup] = false;
+        state._skipStorageRead = true;
+        state.refresh().then(async () => {
+          state.activeGroups[styleChangedGroup] = wasActive;
+          state._poiCache = null;
+          state._poiCacheTime = 0;
+          state._skipStorageRead = true;
+          await state.refresh();
+          resp({ status: 'ok' });
+        });
       } else {
-        controller.stop();
-        unregisterFullListeners();
+        state.refresh().then(() => resp({ status: 'ok' }));
       }
-      resp({ status: 'ok' });
       return true;
     }
+
+    if (msg.action === 'toggle-site-enabled') {
+      const state = getState();
+      if (state) {
+        if (msg.preferences) state.preferences = msg.preferences;
+        state._skipStorageRead = false; // Force storage read to get latest siteEnabled
+
+        // If extension was dormant (page loaded with site OFF), boot it now
+        if (msg.enabled && window.__poiDormant && !window.__poiBooted) {
+          console.log('[EVENTS] Site toggled ON from dormant state, booting extension');
+          if (typeof bootExtension === 'function') {
+            bootExtension(state);
+          }
+        }
+
+        state.refresh().then(() => resp({ status: 'ok' }));
+      } else {
+        resp({ status: 'no-state' });
+      }
+      return true;
+    }
+
     return true;
   });
 
-  const registerFullListeners = () => {
-    if (fullListenersRegistered) return;
-    fullListenersRegistered = true;
+  // ─── 2. Storage Changes (cross-tab sync, preference updates) ────────
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
 
-    messageListener = (msg, sender, resp) => {
-      if (msg.action === 'update-active-groups' || msg.action === 'refresh-pois') {
-        // Only respond in the main frame (window.top === window) to avoid processing in iframes
-        if (window.top !== window) {
-          return;
-        }
-        if (!getController().enabled) {
-          resp({ status: 'disabled' });
-          return true;
-        }
-        const state = window.getPoiStateManager ? window.getPoiStateManager() : window.poiState;
-        if (!state) {
-          resp({ status: 'no-state' });
-          return true;
-        }
-        if (msg.activeGroups) state.activeGroups = msg.activeGroups;
-        if (msg.preferences) state.preferences = msg.preferences;
-        lastMessageUpdate = Date.now();
-        state._skipStorageRead = true;
-        storageRefreshPending = false;
-        if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
-        const styleChanged = !!(msg.preferences && msg.preferences.groupStyles);
-        const styleChangedGroup = msg.styleChangedGroup || null;
-        console.log(`[EVENTS] Message received: styleChanged=${styleChanged}, styleChangedGroup=${styleChangedGroup}, groupStyles=${Object.keys(msg.preferences?.groupStyles || {}).join(',')}`);
-        
-        // If style changed, do a two-step refresh: remove then re-add
-        if (styleChanged && styleChangedGroup && state.activeGroups[styleChangedGroup]) {
-          const wasActive = state.activeGroups[styleChangedGroup];
-          // Step 1: Remove the group
-          state.activeGroups[styleChangedGroup] = false;
-          state._skipStorageRead = true;
-          state.refresh().then(async () => {
-            // Step 2: Re-add the group with new styles
-            state.activeGroups[styleChangedGroup] = wasActive;
-            state._poiCache = null;
-            state._poiCacheTime = 0;
-            state._skipStorageRead = true;
-            await state.refresh();
-            resp({ status: 'ok' });
-          });
-        } else {
-          state.refresh().then(() => resp({ status: 'ok' }));
+    const state = getState();
+    if (!state) return;
+
+    // Skip if this is the same update we just handled via message
+    const skipRefresh = (Date.now() - lastMessageUpdate) < 2000;
+
+    if (changes.preferences) {
+      state.preferences = { ...state.preferences, ...(changes.preferences.newValue || {}) };
+
+      // Check if site was just enabled from dormant state
+      if (window.__poiDormant && !window.__poiBooted) {
+        const host = window.location.hostname;
+        const newPrefs = changes.preferences.newValue || {};
+        const sitePref = newPrefs.sitePreferences?.[host] || {};
+        const nowEnabled = (typeof sitePref.siteEnabled === 'boolean')
+          ? sitePref.siteEnabled
+          : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+        if (nowEnabled && typeof bootExtension === 'function') {
+          console.log('[EVENTS] Storage: Site enabled from dormant state, booting extension');
+          bootExtension(state);
         }
       }
-      return true;
-    };
 
-    storageListener = (changes, area) => {
-      if (area === 'local') {
-        const controller = getController();
-        if (changes.preferences) {
-          const nextEnabled = getSiteEnabledFromPrefs(changes.preferences.newValue || {});
-          if (nextEnabled && !controller.enabled) {
-            controller.start();
-          } else if (!nextEnabled && controller.enabled) {
-            controller.stop();
-          }
-        }
-
-        // Only process in main frame to avoid duplicate refreshes from iframes
-        if (window.top !== window) {
-          return; // Ignore storage changes in iframes
-        }
-
-        if (!controller.enabled) {
-          return; // Do not refresh overlays when disabled
-        }
-
-        const state = window.getPoiStateManager ? window.getPoiStateManager() : window.poiState;
-        if (!state) return;
-
-        // Skip if this is the same update we just handled via message (within 2 seconds to account for slow storage reads)
-        const skipRefresh = (Date.now() - lastMessageUpdate) < 2000;
-        
-        if (changes.preferences) {
-          state.preferences = { ...state.preferences, ...(changes.preferences.newValue || {}) };
-          if (window.manager && !skipRefresh) {
-            window.manager.updateVisibility();
-            window.manager.render();
-          }
-        }
-        if (changes.activeGroups) {
-          state.activeGroups = changes.activeGroups.newValue || state.activeGroups;
-          if (!skipRefresh) {
-            // Debounce: only schedule one refresh, clear previous timer
-            if (storageRefreshTimer) {
-              clearTimeout(storageRefreshTimer);
-            }
-            storageRefreshTimer = setTimeout(() => {
-              storageRefreshPending = false;
-              storageRefreshTimer = null;
-              state.refresh();
-            }, 50); // 50ms debounce to catch rapid storage changes
-            storageRefreshPending = true;
-          }
-        }
-        // Also refresh when POI data changes (new group added, group deleted, rename, etc.)
-        if (changes.poiGroups) {
-          // Always invalidate cache so renames are reflected immediately
-          state._poiCache = null;
-          state._poiCacheTime = 0;
-
-          const activeGroups = Object.keys(state._activeGroups).filter(g => state._activeGroups[g]);
-          const currentPoiKeys = Object.keys(changes.poiGroups.newValue || {});
-          const deletedActiveGroup = activeGroups.find(g => !currentPoiKeys.includes(g));
-          
-          if (deletedActiveGroup && window.manager && window.manager.markerData.length > 0) {
-            window.manager.removeMarkersForGroup(deletedActiveGroup);
-            
-            const filtered = window.manager.markerData.filter(p => p.groupName !== deletedActiveGroup);
-            window.manager.markerData = filtered;
-            
-            const bridgeFiltered = filtered.map(p => {
-              const style = state._preferences.groupStyles[p.groupName] || {};
-              return {
-                id: p.id,
-                name: p.name,
-                latitude: p.latitude,
-                longitude: p.longitude,
-                color: style.color || state._preferences.accentColor,
-                secondaryColor: style.secondaryColor || '#ffffff',
-                logoData: style.logoData
-              };
-            });
-            
-            window.postMessage({
-              type: 'POI_DATA_UPDATE',
-              pois: bridgeFiltered
-            }, '*');
-          } else {
-            if (!skipRefresh) {
-              if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
-              storageRefreshTimer = setTimeout(() => {
-                storageRefreshPending = false;
-                storageRefreshTimer = null;
-                state.refresh();
-              }, 50);
-              storageRefreshPending = true;
-            }
-          }
-        }
+      if (window.manager && !skipRefresh) {
+        window.manager.updateVisibility();
+        window.manager.render();
       }
-    };
-
-    windowMessageListener = (event) => {
-      if (!getController().enabled) return;
-      const state = window.getPoiStateManager ? window.getPoiStateManager() : window.poiState;
-      if (!state) return;
-
-      if (event.data) {
-        if (event.data.type === 'POI_BOUNDS_UPDATE') {
-          state.globalBounds = event.data.bounds;
-          state.globalMethod = event.data.method + (event.data.isIframe ? ' (IFRAME)' : '');
-          state.lastMessageTime = Date.now();
-          if (window.manager) window.manager.extractBounds();
-        } else if (event.data.type === 'POI_NATIVE_ACTIVE') {
-          if (!state.nativeMode) {
-            state.nativeMode = true;
-            if (window.manager) window.manager.render();
-          }
-        } else if (event.data.type === 'POI_MARKER_CLICK') {
-          if (window.manager) {
-            window.manager.handleNativeClick(event.data.id, event.data.lat, event.data.lng);
-          }
-        } else if (event.data.type === 'POI_MARKER_HOVER') {
-          if (window.manager) {
-            window.manager.handleNativeHover(event.data.id, event.data.lat, event.data.lng);
-          }
-        } else if (event.data.type === 'POI_MARKER_LEAVE') {
-          if (window.manager) {
-            window.manager.handleNativeLeave(event.data.id);
-          }
-        }
-      }
-    };
-
-    chrome.runtime.onMessage.addListener(messageListener);
-    chrome.storage.onChanged.addListener(storageListener);
-    window.addEventListener('message', windowMessageListener);
-  };
-
-  const unregisterFullListeners = () => {
-    if (!fullListenersRegistered) return;
-    fullListenersRegistered = false;
-    if (messageListener) chrome.runtime.onMessage.removeListener(messageListener);
-    if (storageListener) chrome.storage.onChanged.removeListener(storageListener);
-    if (windowMessageListener) window.removeEventListener('message', windowMessageListener);
-    messageListener = null;
-    storageListener = null;
-    windowMessageListener = null;
-  };
-
-  // Register full listeners if already enabled
-  chrome.storage.local.get(['preferences']).then(({ preferences }) => {
-    if (getSiteEnabledFromPrefs(preferences)) {
-      registerFullListeners();
     }
-  }).catch(() => {});
+
+    if (changes.activeGroups) {
+      state.activeGroups = changes.activeGroups.newValue || state.activeGroups;
+      if (!skipRefresh) {
+        if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+        storageRefreshTimer = setTimeout(() => {
+          storageRefreshTimer = null;
+          state.refresh();
+        }, 50);
+      }
+    }
+
+    if (changes.poiGroups) {
+      // Invalidate cache so renames/deletes are reflected immediately
+      state._poiCache = null;
+      state._poiCacheTime = 0;
+
+      if (!skipRefresh) {
+        if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+        storageRefreshTimer = setTimeout(() => {
+          storageRefreshTimer = null;
+          state.refresh();
+        }, 50);
+      }
+    }
+  });
+
+  // ─── 3. Bridge Events (from main world via window.postMessage) ──────
+  window.addEventListener('message', (event) => {
+    if (!event.data) return;
+    const state = getState();
+
+    switch (event.data.type) {
+      case 'POI_BRIDGE_READY':
+        // Bridge just loaded and is ready to receive data.
+        // Re-send POI data so the bridge gets it even if the initial send was lost.
+        console.log('[EVENTS] Bridge ready signal received, triggering state.refresh()');
+        if (state) state.refresh();
+        break;
+
+      case 'POI_BOUNDS_UPDATE':
+        // Bridge reporting map bounds from captured map instances
+        if (state) {
+          state.globalBounds = event.data.bounds;
+          state.globalMethod = event.data.method || 'bridge';
+          state.lastMessageTime = Date.now();
+        }
+        if (window.manager) window.manager.extractBounds();
+        break;
+
+      case 'POI_MARKER_CLICK':
+        if (window.manager?.handleNativeClick) {
+          window.manager.handleNativeClick(event.data.id, event.data.lat, event.data.lng);
+        }
+        break;
+
+      case 'POI_MARKER_HOVER':
+        if (window.manager?.handleNativeHover) {
+          window.manager.handleNativeHover(event.data.id, event.data.lat, event.data.lng);
+        }
+        break;
+
+      case 'POI_MARKER_LEAVE':
+        if (window.manager?.handleNativeLeave) {
+          window.manager.handleNativeLeave(event.data.id);
+        }
+        break;
+    }
+  });
+
+  console.log('[EVENTS] Event listeners registered');
 })();
