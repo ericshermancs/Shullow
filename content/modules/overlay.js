@@ -22,6 +22,9 @@ class OverlayManager {
     this.viewportBounds = null;
     this.lastBoundsJson = null;
     this.resizeObserver = null;
+    this.hoverTimeout = null;
+    this.activePopup = null;
+    this.activePopupData = null;
     this.initialize();
   }
 
@@ -103,6 +106,7 @@ class OverlayManager {
   }
 
   destroy() {
+    this.hidePopup();
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.overlay) this.overlay.remove();
     if (this.debugPanel) this.debugPanel.remove();
@@ -129,11 +133,13 @@ class OverlayManager {
   updateMapBounds(b) {
     const json = JSON.stringify(b);
     if (json === this.lastBoundsJson) {
+      this.updatePopupPosition();
       this.updateDebug();
       return;
     }
     this.mapBounds = b;
     this.lastBoundsJson = json;
+    this.updatePopupPosition();
     this.updateDebug();
   }
 
@@ -153,43 +159,143 @@ class OverlayManager {
   }
 
   // Pin rendering is handled by the bridge (native map markers).
-  // render() only updates the debug panel.
+  // render() updates the debug panel and repositions any active popup.
   render() {
+    this.updatePopupPosition();
     this.updateDebug();
   }
 
   /**
-   * Handles native marker click from bridge
+   * Update popup position based on current map bounds.
+   * Uses Mercator projection to convert lat/lng → pixel coordinates.
+   */
+  updatePopupPosition() {
+    if (!this.activePopup || !this.activePopupData || !this.mapBounds || !this.viewportBounds) return;
+
+    const b = this.mapBounds;
+    const w = this.viewportBounds.width;
+    const h = this.viewportBounds.height;
+
+    const projectY = (lat) => {
+      const sin = Math.sin(lat * Math.PI / 180);
+      return Math.log((1 + sin) / (1 - sin)) / 2;
+    };
+
+    const minLatProj = projectY(b.south);
+    const maxLatProj = projectY(b.north);
+
+    const pLat = parseFloat(this.activePopupData.poi.latitude);
+    const pLng = parseFloat(this.activePopupData.poi.longitude);
+
+    if (pLat >= b.south && pLat <= b.north && pLng >= b.west && pLng <= b.east) {
+      const px = ((pLng - b.west) / (b.east - b.west)) * w;
+      const pLatProj = projectY(pLat);
+      const py = ((maxLatProj - pLatProj) / (maxLatProj - minLatProj)) * h;
+
+      this.activePopup.style.left = `${px}px`;
+      this.activePopup.style.top = `${py - 42}px`;
+    } else {
+      this.hidePopup();
+    }
+  }
+
+  /**
+   * Handles native marker click from bridge.
+   * Shows a detail popup for the clicked POI.
    */
   handleNativeClick(id, lat, lng) {
-    console.log('[OverlayManager] Native click:', id, lat, lng);
-    // Find the POI data
-    const poi = this.markerData.find(p => p.id === id || p.name === id);
+    const poi = this.markerData.find(p => (p.id || p.name) === id);
     if (poi) {
-      // Could show a popup/info window here in the future
-      console.log('[OverlayManager] POI clicked:', poi);
+      const pref = window.poiState.preferences;
+      const style = pref.groupStyles[poi.groupName] || {};
+      const color = style.color || pref.accentColor || '#ff0000';
+
+      this.showPopup(poi, 0, 0, color);
+      this.updatePopupPosition();
     }
   }
 
   /**
-   * Handles native marker hover from bridge
+   * Handles native marker hover from bridge.
+   * Shows a detail popup after a brief delay to prevent flicker.
    */
   handleNativeHover(id, lat, lng) {
-    console.log('[OverlayManager] Native hover:', id, lat, lng);
-    // Find the POI data
-    const poi = this.markerData.find(p => p.id === id || p.name === id);
+    const poi = this.markerData.find(p => (p.id || p.name) === id);
     if (poi) {
-      // Could show a tooltip here in the future
-      console.log('[OverlayManager] POI hovered:', poi);
+      if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+
+      const pref = window.poiState.preferences;
+      const style = pref.groupStyles[poi.groupName] || {};
+      const color = style.color || pref.accentColor || '#ff0000';
+
+      this.hoverTimeout = setTimeout(() => {
+        this.showPopup(poi, 0, 0, color);
+        this.updatePopupPosition();
+      }, 100);
     }
   }
 
   /**
-   * Handles native marker leave (mouse out) from bridge
+   * Handles native marker leave (mouse out) from bridge.
+   * Hides popup after a brief delay (allows hovering onto the popup itself).
    */
   handleNativeLeave(id) {
-    console.log('[OverlayManager] Native leave:', id);
-    // Could hide tooltip here in the future
+    if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+    this.hoverTimeout = setTimeout(() => { this.hidePopup(); }, 300);
+  }
+
+  /**
+   * Creates and displays a detail popup for a POI.
+   */
+  showPopup(poi, x, y, color) {
+    this.hidePopup();
+
+    this.activePopupData = { poi, color };
+
+    this.activePopup = document.createElement('div');
+    this.activePopup.className = 'poi-detail-popup';
+    this.activePopup.style.cssText = `
+      position: absolute; left: ${x}px; top: ${y - 42}px; transform: translate(-50%, -100%);
+      background: rgba(0, 0, 0, 0.95); color: #ffffff; font-family: monospace; font-size: 12px;
+      border: 1px solid ${color}; padding: 10px; z-index: 2147483647; pointer-events: auto;
+      white-space: normal; width: max-content; max-width: 250px; cursor: default;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 10px ${color}44; border-radius: 4px;
+      transition: top 0.1s linear, left 0.1s linear;
+    `;
+
+    // Allow hovering popup to keep it open
+    this.activePopup.onmouseenter = () => {
+      if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
+    };
+    this.activePopup.onmouseleave = () => {
+      this.hidePopup();
+    };
+
+    this.activePopup.innerHTML = `
+      <div style="font-weight: bold; border-bottom: 1px solid ${color}; margin-bottom: 6px; padding-bottom: 4px; color: #ffffff !important;">${poi.name}</div>
+      <div style="font-size: 10px; opacity: 0.9; color: #cccccc !important;">GROUP: ${poi.groupName.toUpperCase()}</div>
+      <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: #ffffff !important;">${poi.address || 'No address available'}</div>
+      ${Object.entries(poi)
+        .filter(([k, v]) => !['name', 'groupName', 'address', 'latitude', 'longitude', 'id', 'color', 'secondaryColor', 'logoData'].includes(k) && v !== null && v !== undefined && String(v).trim() !== '')
+        .map(([k, v]) => `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px; color: #dddddd !important;">${k.toUpperCase()}: ${v}</div>`)
+        .join('')}
+    `;
+    this.overlay.appendChild(this.activePopup);
+  }
+
+  /**
+   * Hides the currently active popup and cleans up timers.
+   */
+  hidePopup() {
+    if (this.activePopup) {
+      this.activePopup.remove();
+      this.activePopup = null;
+      this.activePopupData = null;
+    }
+    if (this.hoverTimeout) {
+      clearTimeout(this.hoverTimeout);
+      this.hoverTimeout = null;
+    }
   }
 }
 
