@@ -260,7 +260,8 @@ class POIStateManager {
           longitude: p.longitude,
           color,
           secondaryColor,
-          logoData
+          logoData,
+          groupName: g
         });
       });
     });
