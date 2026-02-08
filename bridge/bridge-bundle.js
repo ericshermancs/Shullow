@@ -3173,6 +3173,9 @@ var window = (() => {
     const PREFIX = " [POI TITAN] ";
     let attempts = 0;
     let registryInitialized = false;
+    let enabled = true;
+    let loopIntervalId = null;
+    let cleanupIntervalId = null;
     function extractBounds(map) {
       try {
         const b = map.getBounds();
@@ -3197,6 +3200,8 @@ var window = (() => {
       }
     }
     function loop() {
+      if (!enabled)
+        return;
       if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal) {
         if (attempts < 20) {
           attempts++;
@@ -3256,13 +3261,63 @@ var window = (() => {
         console.error(PREFIX + "Main loop failure:", e);
       }
     }
-    setInterval(loop, 500);
-    setInterval(() => {
-      if (window.overlayRegistry) {
-        window.overlayRegistry.cleanup();
+    function startBridge() {
+      if (enabled) {
+        if (!loopIntervalId) {
+          loopIntervalId = setInterval(loop, 500);
+        }
+        if (!cleanupIntervalId) {
+          cleanupIntervalId = setInterval(() => {
+            if (window.overlayRegistry) {
+              window.overlayRegistry.cleanup();
+            }
+          }, 3e5);
+        }
+        return;
       }
-    }, 3e5);
+      enabled = true;
+      document.documentElement.setAttribute("data-poi-bridge-status", "ONLINE");
+      loopIntervalId = setInterval(loop, 500);
+      cleanupIntervalId = setInterval(() => {
+        if (window.overlayRegistry) {
+          window.overlayRegistry.cleanup();
+        }
+      }, 3e5);
+      loop();
+    }
+    function stopBridge() {
+      enabled = false;
+      document.documentElement.removeAttribute("data-poi-bridge-status");
+      document.documentElement.removeAttribute("data-poi-bounds");
+      document.documentElement.removeAttribute("data-poi-map-type");
+      document.documentElement.removeAttribute("data-poi-timestamp");
+      if (loopIntervalId) {
+        clearInterval(loopIntervalId);
+        loopIntervalId = null;
+      }
+      if (cleanupIntervalId) {
+        clearInterval(cleanupIntervalId);
+        cleanupIntervalId = null;
+      }
+      if (window.overlayRegistry) {
+        window.overlayRegistry.clear();
+      }
+      if (window.poiRenderer && typeof window.poiRenderer.clear === "function") {
+        window.poiRenderer.clear();
+      }
+    }
+    startBridge();
     window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "POI_BRIDGE_ENABLE") {
+        if (event.data.enabled) {
+          startBridge();
+        } else {
+          stopBridge();
+        }
+        return;
+      }
+      if (!enabled)
+        return;
       if (event.data && event.data.type === "POI_DATA_UPDATE") {
         let nativeRenderSuccess = false;
         if (window.overlayRegistry) {
@@ -3420,6 +3475,31 @@ var window = (() => {
     activeMarkers: /* @__PURE__ */ new Map(),
     // Map<id, NativeMarker>
     lastPoiData: [],
+    clear() {
+      this.lastPoiData = [];
+      this.activeMarkers.forEach((marker) => {
+        if (marker && typeof marker.remove === "function") {
+          marker.remove();
+        } else if (marker && typeof marker.setMap === "function") {
+          marker.setMap(null);
+        }
+      });
+      this.activeMarkers.clear();
+      if (window.poiHijack && window.poiHijack.activeMaps) {
+        for (const map of window.poiHijack.activeMaps) {
+          if (map && map._poiBatchLayer) {
+            try {
+              map._poiBatchLayer.setMap(null);
+            } catch (e) {
+            }
+            if (map._poiBatchLayer.container) {
+              map._poiBatchLayer.container.remove();
+            }
+            map._poiBatchLayer = null;
+          }
+        }
+      }
+    },
     update(pois) {
       this.lastPoiData = pois;
       if (!window.poiHijack || !window.poiHijack.activeMaps)

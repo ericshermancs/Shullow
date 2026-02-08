@@ -41,9 +41,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await StorageManager.saveState(preferences, activeGroups);
     StorageManager.notifyContentScript(activeGroups, preferences);
   };
+  const getSiteEnabled = () => {
+    const sitePref = preferences.sitePreferences?.[currentHost];
+    if (sitePref && typeof sitePref.siteEnabled === 'boolean') return sitePref.siteEnabled;
+    if (sitePref && typeof sitePref.overlayEnabled === 'boolean') return sitePref.overlayEnabled;
+    return true;
+  };
   const updateSiteToggle = () => {
-    const sitePref = preferences.sitePreferences[currentHost] || { overlayEnabled: true };
-    overlayToggle.checked = sitePref.overlayEnabled;
+    overlayToggle.checked = getSiteEnabled();
   };
 
   // --- Modal Logic ---
@@ -189,9 +194,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Listeners ---
   overlayToggle.addEventListener('change', (e) => {
     if (!preferences.sitePreferences) preferences.sitePreferences = {};
-    preferences.sitePreferences[currentHost] = { overlayEnabled: e.target.checked };
+    const enabled = e.target.checked;
+    const existing = preferences.sitePreferences[currentHost] || {};
+    preferences.sitePreferences[currentHost] = { ...existing, siteEnabled: enabled, overlayEnabled: enabled };
     saveData();
-    updateStatus(e.target.checked ? 'OVERLAY ON' : 'OVERLAY OFF');
+    StorageManager.notifyTabsForHost(currentHost, {
+      action: 'toggle-site-enabled',
+      enabled,
+      host: currentHost
+    });
+    updateStatus(enabled ? 'SITE ON' : 'SITE OFF');
   });
 
   debugToggle.addEventListener('change', (e) => {

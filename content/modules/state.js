@@ -357,6 +357,13 @@ class POIStateManager {
   }
 }
 
-// Create singleton instance and export to global scope
-const stateManager = new POIStateManager();
-window.poiState = stateManager;
+// Export class to global scope without instantiating (lazy init)
+if (typeof window !== 'undefined') {
+  window.POIStateManager = POIStateManager;
+  window.getPoiStateManager = () => {
+    if (!window.poiState) {
+      window.poiState = new POIStateManager();
+    }
+    return window.poiState;
+  };
+}

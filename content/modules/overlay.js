@@ -8,6 +8,14 @@ const getPinSvg = (color = '#ff0000', secondaryColor = '#ffffff') => `data:image
 </svg>
 `)}`;
 
+const getEffectiveHost = () => {
+  if (window.top === window) return window.location.hostname;
+  try {
+    if (document.referrer) return new URL(document.referrer).hostname;
+  } catch (e) {}
+  return window.location.hostname;
+};
+
 class OverlayManager {
   constructor(container) {
     this.container = container;
@@ -67,11 +75,14 @@ class OverlayManager {
   updateVisibility() {
     if (!this.overlay || !this.debugPanel) return;
     const pref = window.poiState.preferences;
-    const host = window.location.hostname;
-    const sitePref = pref.sitePreferences?.[host] || { overlayEnabled: true };
+    const host = getEffectiveHost();
+    const sitePref = pref.sitePreferences?.[host] || {};
+    const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+      ? sitePref.siteEnabled
+      : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
     
-    this.overlay.style.display = sitePref.overlayEnabled ? 'block' : 'none';
-    this.debugPanel.style.display = pref.debugEnabled ? 'block' : 'none';
+    this.overlay.style.display = siteEnabled ? 'block' : 'none';
+    this.debugPanel.style.display = (siteEnabled && pref.debugEnabled) ? 'block' : 'none';
     
     this.debugPanel.style.color = pref.accentColor;
     this.debugPanel.style.borderColor = pref.accentColor;
@@ -281,9 +292,12 @@ class OverlayManager {
     // Instead, update both pins AND the popup position.
     
     const pref = window.poiState.preferences;
-    const host = window.location.hostname;
-    const sitePref = pref.sitePreferences?.[host] || { overlayEnabled: true };
-    if (!sitePref.overlayEnabled) { 
+    const host = getEffectiveHost();
+    const sitePref = pref.sitePreferences?.[host] || {};
+    const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+      ? sitePref.siteEnabled
+      : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+    if (!siteEnabled) { 
         this.overlay.querySelectorAll('.poi-marker-overlay').forEach(m => m.remove());
         this.updateDebug(); 
         return; 

@@ -8,6 +8,9 @@
   const PREFIX = ' [POI TITAN] ';
   let attempts = 0;
   let registryInitialized = false;
+  let enabled = true;
+  let loopIntervalId = null;
+  let cleanupIntervalId = null;
 
   function extractBounds(map) {
     try {
@@ -39,6 +42,7 @@
   }
 
   function loop() {
+    if (!enabled) return;
     // 1. Dependency Guard
     if (!window.poiHijack || !window.poiDiscovery || !window.poiPortal) {
       if (attempts < 20) {
@@ -122,19 +126,71 @@
     }
   }
 
+  function startBridge() {
+    if (enabled) {
+      if (!loopIntervalId) {
+        loopIntervalId = setInterval(loop, 500);
+      }
+      if (!cleanupIntervalId) {
+        cleanupIntervalId = setInterval(() => {
+          if (window.overlayRegistry) {
+            window.overlayRegistry.cleanup();
+          }
+        }, 300000);
+      }
+      return;
+    }
+
+    enabled = true;
+    document.documentElement.setAttribute('data-poi-bridge-status', 'ONLINE');
+    loopIntervalId = setInterval(loop, 500);
+    cleanupIntervalId = setInterval(() => {
+      if (window.overlayRegistry) {
+        window.overlayRegistry.cleanup();
+      }
+    }, 300000);
+    loop();
+  }
+
+  function stopBridge() {
+    enabled = false;
+    document.documentElement.removeAttribute('data-poi-bridge-status');
+    document.documentElement.removeAttribute('data-poi-bounds');
+    document.documentElement.removeAttribute('data-poi-map-type');
+    document.documentElement.removeAttribute('data-poi-timestamp');
+
+    if (loopIntervalId) {
+      clearInterval(loopIntervalId);
+      loopIntervalId = null;
+    }
+    if (cleanupIntervalId) {
+      clearInterval(cleanupIntervalId);
+      cleanupIntervalId = null;
+    }
+
+    if (window.overlayRegistry) {
+      window.overlayRegistry.clear();
+    }
+    if (window.poiRenderer && typeof window.poiRenderer.clear === 'function') {
+      window.poiRenderer.clear();
+    }
+  }
+
   // Start Orchestration
   // 500ms interval: Fast enough to catch native marker injection within ~500ms window
-  setInterval(loop, 500); 
-  
-  // Periodic registry cleanup (every 5 minutes)
-  setInterval(() => {
-    if (window.overlayRegistry) {
-      window.overlayRegistry.cleanup();
-    }
-  }, 300000);
+  startBridge();
   
   // Listen for Data from Content Script
   window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'POI_BRIDGE_ENABLE') {
+      if (event.data.enabled) {
+        startBridge();
+      } else {
+        stopBridge();
+      }
+      return;
+    }
+    if (!enabled) return;
     if (event.data && event.data.type === 'POI_DATA_UPDATE') {
        let nativeRenderSuccess = false;
        
