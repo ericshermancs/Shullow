@@ -43,7 +43,8 @@ class RealtorOverlay extends MapOverlayBase {
    * @protected
    */
   _getNativeMarkerSelector() {
-    return '.poi-native-marker, .poi-native-marker-mapbox, .poi-native-marker-realtor';
+    // Only detect site-specific markers, not extension markers
+    return null;
   }
 
   /**
@@ -218,16 +219,7 @@ class RealtorOverlay extends MapOverlayBase {
     return false;
   }
 
-  /**
-   * Checks if a native marker for this POI exists in the DOM
-   * Uses base class implementation which looks for any poi-native-marker class
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if native marker exists
-   */
-  _hasNativeMarker(poi) {
-    // Use base class implementation which looks for any [class^="poi-native-marker"]
-    return super._hasNativeMarker(poi);
-  }
+  // _hasNativeMarker uses the base class implementation from MapOverlayBase
 
   /**
    * @override
@@ -254,13 +246,6 @@ class RealtorOverlay extends MapOverlayBase {
           return;
         }
       }
-    }
-
-    // Check if native mode is active via global state
-    if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
-      this.log('Native mode active, clearing overlay markers');
-      this.clear();
-      return;
     }
 
     if (!mapInstance) {
@@ -362,7 +347,7 @@ class RealtorOverlay extends MapOverlayBase {
    */
   createMarker(poi, map) {
     const el = document.createElement('div');
-    el.className = 'poi-native-marker-realtor';
+    el.className = 'poi-overlay-marker-realtor';
 
     const color = poi.color || '#ff0000';
     const secondaryColor = poi.secondaryColor || '#ffffff';

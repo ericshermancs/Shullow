@@ -129,54 +129,64 @@ class MapHijackManager extends ManagerBase {
    */
   interceptConstructors() {
     const self = this;
+    console.log('[MapHijackManager] interceptConstructors called');
     
     // TRAP: Google Maps (window.google)
     if (window.google?.maps?.Map) {
+       console.log('[MapHijackManager] window.google.maps.Map found, hijacking immediately');
        this.hijackGoogle(window.google.maps);
     } else {
+       console.log('[MapHijackManager] window.google.maps.Map not found yet, setting up property trap');
        if (!window._poiTrappedGoogle) {
-          let _google = window.google;
+          try {
+            let _google = window.google;
           
-          Object.defineProperty(window, 'google', {
-             get() { return _google; },
-             set(val) {
-                _google = val;
+            Object.defineProperty(window, 'google', {
+               get() { return _google; },
+               set(val) {
+                  _google = val;
+                  console.log('[MapHijackManager] google property set, val.maps:', !!val?.maps);
                 
-                // If maps is already there, hijack immediately
-                if (val?.maps) {
-                   if (val.maps.Map) {
-                      self.hijackGoogle(val.maps);
-                   }
+                  // If maps is already there, hijack immediately
+                  if (val?.maps) {
+                     if (val.maps.Map) {
+                        console.log('[MapHijackManager] Hijacking from property setter');
+                        self.hijackGoogle(val.maps);
+                     }
                    
-                   // ALWAYS replace google.maps with a Proxy to catch lazy definition of Map
-                   try {
-                      const mapsProxy = new Proxy(val.maps, {
-                         set(target, prop, value) {
-                            if (prop === 'Map') {
-                               const Original = value;
-                               function HijackedMap(...args) {
-                                  if (!new.target) return new HijackedMap(...args);
-                                  const instance = new Original(...args);
-                                  self.activeMaps.add(instance);
-                                  self.attachListeners(instance);
-                                  return instance;
-                               }
-                               HijackedMap.prototype = Original.prototype;
-                               HijackedMap._isHijacked = true;
-                               Object.assign(HijackedMap, Original);
-                               target[prop] = HijackedMap;
-                               return true;
-                            }
-                            target[prop] = value;
-                            return true;
-                         }
-                      });
-                      _google.maps = mapsProxy;
-                   } catch(e) {}
-                }
-             },
-             configurable: true
-          });
+                     // ALWAYS replace google.maps with a Proxy to catch lazy definition of Map
+                     try {
+                        const mapsProxy = new Proxy(val.maps, {
+                           set(target, prop, value) {
+                              if (prop === 'Map') {
+                                 const Original = value;
+                                 function HijackedMap(...args) {
+                                    if (!new.target) return new HijackedMap(...args);
+                                    const instance = new Original(...args);
+                                    self.activeMaps.add(instance);
+                                    self.attachListeners(instance);
+                                    return instance;
+                                 }
+                                 HijackedMap.prototype = Original.prototype;
+                                 HijackedMap._isHijacked = true;
+                                 Object.assign(HijackedMap, Original);
+                                 target[prop] = HijackedMap;
+                                 return true;
+                              }
+                              target[prop] = value;
+                              return true;
+                           }
+                        });
+                        _google.maps = mapsProxy;
+                     } catch(e) {}
+                  }
+               },
+               configurable: true
+            });
+          } catch(e) {
+            console.warn('[MapHijackManager] Failed to set property trap on window.google:', e.message);
+          }
+          // Always mark as trapped (even if it failed) to avoid retrying and throwing every loop
           window._poiTrappedGoogle = true;
        }
     }
@@ -204,11 +214,14 @@ class MapHijackManager extends ManagerBase {
    */
   hijackGoogle(mapsObj) {
     const self = this;
+    console.log('[MapHijackManager] hijackGoogle called, mapsObj.Map:', !!mapsObj.Map);
     try {
        if (mapsObj.Map && !mapsObj.Map._isHijacked) {
+         console.log('[MapHijackManager] Hijacking google.maps.Map constructor');
          const Original = mapsObj.Map;
          function HijackedMap(...args) {
            if (!new.target) return new HijackedMap(...args);
+           console.log('[MapHijackManager] Google Maps constructor called, capturing instance');
            const instance = new Original(...args);
            self.activeMaps.add(instance);
            self.attachListeners(instance);
@@ -218,6 +231,9 @@ class MapHijackManager extends ManagerBase {
          HijackedMap._isHijacked = true;
          Object.assign(HijackedMap, Original);
          mapsObj.Map = HijackedMap;
+         console.log('[MapHijackManager] Hijack complete');
+       } else {
+         console.log('[MapHijackManager] Map already hijacked or not available');
        }
        
        // BACKDOOR: Prototype Hijack
@@ -246,7 +262,9 @@ class MapHijackManager extends ManagerBase {
              }
           });
        }
-     } catch(e) {}
+     } catch(e) {
+       console.error('[MapHijackManager] Error in hijackGoogle:', e);
+     }
   }
 
   /**

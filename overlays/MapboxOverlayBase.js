@@ -124,10 +124,9 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @protected
    */
   _getNativeMarkerSelector() {
-    // Return selector for extension-injected native markers
-    // This enables automatic switching from overlay to native pins
-    // Subclasses can override to add site-specific selectors
-    return '.poi-native-marker-mapbox, .poi-native-marker';
+    // Base class returns null - we ARE the native rendering system.
+    // Subclasses override to detect the SITE's own markers to avoid doubling up.
+    return null;
   }
 
   /**
@@ -165,7 +164,7 @@ class MapboxOverlayBase extends MapOverlayBase {
    * @param {Object} mapInstance - The map instance
    */
   renderMarkers(pois, mapInstance) {
-    console.log(`[MAPBOX] renderMarkers called: ${pois.length} POIs, activeMarkers=${this.activeMarkers.size}`);
+    this.log(`renderMarkers called: ${pois?.length || 0} POIs, mapInstance=${!!mapInstance}, activeMarkers=${this.activeMarkers.size}, _nativeMarkersInjected=${this._nativeMarkersInjected}`);
     // CRITICAL: Check native marker flag FIRST before any other logic
     // This prevents re-rendering after native markers are detected
     if (this._nativeMarkersInjected) {
@@ -188,14 +187,8 @@ class MapboxOverlayBase extends MapOverlayBase {
       }
     }
 
-    // Check if native mode is active via state
-    if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
-      this.log('Native mode active, clearing overlay markers');
-      this.clear();
-      return;
-    }
-
     const filteredPois = this._filterNativePois(pois);
+    this.log(`After filtering: ${filteredPois.length} of ${pois.length} POIs remain`);
 
     if (!mapInstance) {
       this.log('No map instance provided');
@@ -279,7 +272,7 @@ class MapboxOverlayBase extends MapOverlayBase {
    */
   createMarkerElement(poi) {
     const el = document.createElement('div');
-    el.className = 'poi-native-marker-mapbox';
+    el.className = 'poi-overlay-marker-mapbox';
 
     const color = poi.color || '#ff0000';
     const secondaryColor = poi.secondaryColor || '#ffffff';
@@ -407,33 +400,8 @@ class MapboxOverlayBase extends MapOverlayBase {
     return pois.filter(poi => !this._hasNativeMarker(poi));
   }
 
-  /**
-   * Checks if a POI has a native marker in the DOM
-   * Queries the DOM for markers with any native-marker class variant
-   * @param {Object} poi - POI object
-   * @returns {boolean} True if the POI has a native marker
-   */
-  _hasNativeMarker(poi) {
-    if (typeof this._hasLoggedNativeMarker === 'undefined') {
-      this._hasLoggedNativeMarker = false;
-      this._nativeMarkerPreviouslyFound = false;
-    }
-
-    // Check for EXACT class "poi-native-marker" - only Google Maps batch overlay creates this
-    const selector = `.poi-native-marker[data-id="${MapUtils.getPoiId(poi)}"]`;
-    const found = !!document.querySelector(selector);
-
-    // Only log once when native marker is first detected
-    if (found && !this._hasLoggedNativeMarker && !this._nativeMarkerPreviouslyFound) {
-      this.log('Native marker detected');
-      this._hasLoggedNativeMarker = true;
-    }
-    // Track if native marker was ever found
-    if (found) {
-      this._nativeMarkerPreviouslyFound = true;
-    }
-    return found;
-  }
+  // _hasNativeMarker uses the base class implementation from MapOverlayBase
+  // which delegates to _hasSiteNativeMarker() and _hasExtensionMarker().
 }
 
 // Export for different module systems

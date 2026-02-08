@@ -229,11 +229,13 @@ class GenericMapOverlay extends MapOverlayBase {
 
   /**
    * Gets the CSS selector for native markers
-   * @returns {string} CSS selector for extension-injected native markers
+   * Returns null - we ARE the native rendering system.
+   * Site-native marker detection is handled in renderMarkers via common selectors.
+   * @returns {null}
    * @protected
    */
   _getNativeMarkerSelector() {
-    return '.poi-native-marker, .poi-native-marker-mapbox, .poi-native-marker-generic';
+    return null;
   }
 
   /**
@@ -408,9 +410,6 @@ class GenericMapOverlay extends MapOverlayBase {
           this._nativeMarkersInjected = true;
           console.log(`[GenericMapOverlay] Site native markers detected via polling (${totalSiteMarkers} found using common patterns)`);
           this.log(`Site native markers detected via polling (${totalSiteMarkers} found using common patterns), switching to native mode`);
-          if (typeof window !== 'undefined' && window.poiState) {
-            window.poiState.nativeMode = true;
-          }
           this.clear();
           this._stopNativeMarkerPolling();
           return;
@@ -434,9 +433,6 @@ class GenericMapOverlay extends MapOverlayBase {
             this._nativeMarkersInjected = true;
             console.log(`[GenericMapOverlay] Site native markers detected via learned patterns (${learnedPatternMarkers} found using ${this._siteNativeMarkerPatterns.length} learned patterns)`);
             this.log(`Site native markers detected via learned patterns (${learnedPatternMarkers} found), switching to native mode`);
-            if (typeof window !== 'undefined' && window.poiState) {
-              window.poiState.nativeMode = true;
-            }
             this.clear();
             this._stopNativeMarkerPolling();
             return;
@@ -551,27 +547,6 @@ class GenericMapOverlay extends MapOverlayBase {
       }
     }
     
-    // Check for extension-injected markers
-    const selector = this._getNativeMarkerSelector();
-    if (selector) {
-      const nativeMarkers = document.querySelectorAll(selector);
-      if (nativeMarkers.length > 0) {
-        this._nativeMarkersInjected = true;
-        console.log('[GenericMapOverlay] Extension native markers detected at render time, clearing overlay');
-        this.log('Extension native markers detected at render time, clearing overlay');
-        this.clear();
-        return;
-      }
-    }
-
-    // Check if native mode is active via global state
-    if (typeof window !== 'undefined' && window.poiState && window.poiState.nativeMode) {
-      console.log('[GenericMapOverlay] Native mode active, clearing overlay markers');
-      this.log('Native mode active, clearing overlay markers');
-      this.clear();
-      return;
-    }
-
     console.log('[GenericMapOverlay] Proceeding with overlay render');
     const filteredPois = this._filterNativePois(pois);
     if (!mapInstance) {
@@ -696,7 +671,7 @@ class GenericMapOverlay extends MapOverlayBase {
    */
   createMarker(poi, map) {
     const el = document.createElement('div');
-    el.className = 'poi-native-marker-generic';
+    el.className = 'poi-overlay-marker-generic';
 
     const color = poi.color || '#ff0000';
     const secondaryColor = poi.secondaryColor || '#ffffff';

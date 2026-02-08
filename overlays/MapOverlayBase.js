@@ -241,16 +241,16 @@ class MapOverlayBase {
 
   /**
    * Checks if the extension has already rendered a marker for this POI
-   * Used to prevent duplicate overlay rendering
+   * Always returns false — the extension is the sole rendering system,
+   * so its own markers should never block re-renders.
    * @param {Object} poi - POI object
-   * @returns {boolean} True if extension marker exists
+   * @returns {boolean} Always false
    * @protected
    */
   _hasExtensionMarker(poi) {
-    // Check for extension's own overlay markers
-    // Classes: poi-overlay-marker, poi-native-marker-mapbox, poi-native-marker-realtor, poi-native-marker-generic
-    const selector = `[class*="poi-"], [data-poi-id="${MapUtils.getPoiId(poi)}"]`;
-    return !!document.querySelector(selector);
+    // The extension is the sole rendering system — our own markers should not
+    // block re-renders. Site-native markers are caught by _hasSiteNativeMarker().
+    return false;
   }
 
   /**

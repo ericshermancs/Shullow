@@ -183,6 +183,8 @@ class MapDiscoveryManager extends ManagerBase {
        if (this._idleCounter % 10 !== 0) return; 
     }
     
+    console.log('[MapDiscoveryManager] run() called, activeMaps:', window.poiHijack.activeMaps.size);
+    
     // A. Mapbox Global Registry
     this._discoverMapboxGlobal();
     
@@ -191,6 +193,25 @@ class MapDiscoveryManager extends ManagerBase {
     
     // C. DOM & Fiber
     this._discoverDOMAndFiber();
+    
+    // D. FALLBACK: If we still have 0 maps, try window.google.maps directly (for hijacked instances)
+    if (window.poiHijack.activeMaps.size === 0 && window.google?.maps) {
+      console.log('[MapDiscoveryManager] No maps found via discovery, checking window.google.maps...');
+      // The hijack should have captured any maps created via the Google Maps constructor
+      // If not, there might be maps created before hijack was installed
+      // Try to find them via window.google.maps internals (varies by version)
+      if (window.google.maps._instances) {
+        console.log('[MapDiscoveryManager] Found window.google.maps._instances');
+        for (const instance of window.google.maps._instances) {
+          if (instance && typeof instance.getBounds === 'function') {
+            console.log('[MapDiscoveryManager] Registering map from window.google.maps._instances');
+            this._registerMap(instance, null);
+          }
+        }
+      }
+    }
+    
+    console.log('[MapDiscoveryManager] run() complete, now have:', window.poiHijack.activeMaps.size, 'maps');
   }
 
   /**
@@ -258,65 +279,89 @@ class MapDiscoveryManager extends ManagerBase {
     const mapProps = ['map', 'mapInstance', 'innerMap', '__google_map__', 'mapObject', 'viewer', '__e3_'];
     
     let foundCount = 0;
-    selectors.forEach(sel => {
-      const elements = this.findAllInShadow(document, sel);
-      if (elements.length > 0) {
-        console.log('[MapDiscoveryManager] Found', elements.length, 'elements with selector:', sel);
-      }
-      
-      elements.forEach(el => {
-        let curr = el;
-        
-        
-        for (let i = 0; i < 5 && curr; i++) {
-          for (const p of mapProps) { 
-            try { 
-              const candidate = curr[p];
-              if (candidate && typeof candidate.getBounds === 'function') {
-                console.log('[MapDiscoveryManager] Found map instance via', p, 'selector:', sel);
-                foundCount++;
-                // PHASE 6.5: Use _registerMap with container context
-                this._registerMap(candidate, el);
-              } else if (candidate && typeof candidate === 'object') {
-                const extracted = this._extractMapFromCandidate(candidate);
-                if (extracted) {
-                  console.log('[MapDiscoveryManager] Extracted map instance via', p, 'selector:', sel);
-                  foundCount++;
-                  this._registerMap(extracted, el);
-                }
-              }
-            } catch(e) {} 
-          }
-          const fiberKey = Object.keys(curr).find(k => k.startsWith('__reactFiber'));
-          if (fiberKey) {
-            let fiber = curr[fiberKey];
-            while (fiber) {
-              if (fiber.memoizedProps) { 
-                for (const p of mapProps) { 
-                  try { 
-                    const val = fiber.memoizedProps[p];
-                    // Relaxed Check: getBounds OR setCenter (Duck Typing)
-                    if (val && (typeof val.getBounds === 'function' || typeof val.setCenter === 'function')) {
-                      this.log('Discovery found map via Fiber prop:', p);
-                      // PHASE 6.5: Use _registerMap with container context
-                      this._registerMap(val, el);
-                    } else if (val && typeof val === 'object') {
-                      const extracted = this._extractMapFromCandidate(val);
-                      if (extracted) {
-                        this.log('Discovery extracted map via Fiber prop:', p);
-                        this._registerMap(extracted, el);
-                      }
-                    }
-                  } catch(e) {} 
-                } 
-              }
-              fiber = fiber.return;
+    console.log('[MapDiscoveryManager] _discoverDOMAndFiber: checking', selectors.length, 'selectors...');
+    
+    // Quick test: can we find .gm-style directly?
+    const quickTest = document.querySelector('.gm-style');
+    console.log('[MapDiscoveryManager] Quick test: document.querySelector(".gm-style"):', !!quickTest);
+    
+    // If found, try to get map from it
+    if (quickTest) {
+      let curr = quickTest;
+      for (let i = 0; i < 5 && curr; i++) {
+        for (const p of mapProps) {
+          try {
+            const candidate = curr[p];
+            if (candidate && typeof candidate.getBounds === 'function') {
+              console.log('[MapDiscoveryManager] FOUND MAP via property', p);
+              foundCount++;
+              this._registerMap(candidate, quickTest);
+              break;
             }
-          }
-          curr = curr.parentElement || (curr.parentNode instanceof ShadowRoot ? curr.parentNode.host : null);
+          } catch(e) {}
         }
-      });
+        curr = curr.parentElement;
+      }
+    }
+    
+    selectors.forEach(sel => {
+      try {
+        const elements = this.findAllInShadow(document, sel);
+        console.log('[MapDiscoveryManager] Selector "' + sel + '": found', elements.length, 'elements');
+        
+        elements.forEach(el => {
+          let curr = el;
+          
+          for (let i = 0; i < 5 && curr; i++) {
+            for (const p of mapProps) { 
+              try { 
+                const candidate = curr[p];
+                if (candidate && typeof candidate.getBounds === 'function') {
+                  console.log('[MapDiscoveryManager] Found map instance via', p, 'on selector:', sel);
+                  foundCount++;
+                  this._registerMap(candidate, el);
+                } else if (candidate && typeof candidate === 'object') {
+                  const extracted = this._extractMapFromCandidate(candidate);
+                  if (extracted) {
+                    console.log('[MapDiscoveryManager] Extracted map instance via', p, 'on selector:', sel);
+                    foundCount++;
+                    this._registerMap(extracted, el);
+                  }
+                }
+              } catch(e) {} 
+            }
+            const fiberKey = Object.keys(curr).find(k => k.startsWith('__reactFiber'));
+            if (fiberKey) {
+              let fiber = curr[fiberKey];
+              while (fiber) {
+                if (fiber.memoizedProps) { 
+                  for (const p of mapProps) { 
+                    try { 
+                      const val = fiber.memoizedProps[p];
+                      if (val && (typeof val.getBounds === 'function' || typeof val.setCenter === 'function')) {
+                        console.log('[MapDiscoveryManager] Found map via Fiber prop:', p);
+                        this._registerMap(val, el);
+                      } else if (val && typeof val === 'object') {
+                        const extracted = this._extractMapFromCandidate(val);
+                        if (extracted) {
+                          console.log('[MapDiscoveryManager] Extracted map via Fiber prop:', p);
+                          this._registerMap(extracted, el);
+                        }
+                      }
+                    } catch(e) {} 
+                  } 
+                }
+                fiber = fiber.return;
+              }
+            }
+            curr = curr.parentElement || (curr.parentNode instanceof ShadowRoot ? curr.parentNode.host : null);
+          }
+        });
+      } catch(e) {
+        console.error('[MapDiscoveryManager] Error processing selector "' + sel + '":', e);
+      }
     });
+    console.log('[MapDiscoveryManager] _discoverDOMAndFiber found:', foundCount, 'maps total');
   }
 
   /**

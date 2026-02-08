@@ -71,10 +71,10 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
    * @protected
    */
   _getNativeMarkerSelector() {
-    // Return selector for extension-injected native markers
-    // This enables automatic switching from overlay to native pins
-    // Subclasses can override to add site-specific selectors
-    return '.poi-native-marker, .poi-native-marker-mapbox';
+    // Base class returns null - we ARE the native rendering system.
+    // Subclasses override to detect the SITE's own markers (e.g., Redfin pushpins)
+    // to avoid doubling up.
+    return null;
   }
 
   /**
@@ -184,7 +184,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
         // Event Delegation - Click
         this.container.addEventListener('click', (e) => {
-          const target = e.target.closest('.poi-native-marker');
+          const target = e.target.closest('.poi-overlay-marker');
           if (target) {
             e.stopPropagation();
             const id = target.getAttribute('data-id');
@@ -196,7 +196,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
         // Event Delegation - Mouse Enter
         this.container.addEventListener('mouseenter', (e) => {
-          const target = e.target.closest('.poi-native-marker');
+          const target = e.target.closest('.poi-overlay-marker');
           if (target) {
             target.style.zIndex = '1000000';
             const id = target.getAttribute('data-id');
@@ -208,7 +208,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
         // Event Delegation - Mouse Leave
         this.container.addEventListener('mouseleave', (e) => {
-          const target = e.target.closest('.poi-native-marker');
+          const target = e.target.closest('.poi-overlay-marker');
           if (target) {
             target.style.zIndex = '102';
             const id = target.getAttribute('data-id');
@@ -219,10 +219,6 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
 
       updatePois(newPois) {
         this.pois = newPois;
-        if (newPois && newPois.length > 0) {
-          // Set flag to indicate native markers are injected
-          self._nativeMarkersInjected = true;
-        }
         if (this.getProjection()) this.draw();
       }
 
@@ -354,6 +350,7 @@ class GoogleMapsOverlayBase extends MapOverlayBase {
     }
     
     const filteredPois = this._filterNativePois(pois);
+    this.log(`After filtering: ${filteredPois.length} of ${pois.length} POIs remain`);
     if (!mapInstance) {
       this.log('No map instance provided');
       return;

@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   const saveData = async () => {
     await StorageManager.saveState(preferences, activeGroups);
-    // Note: Do NOT call notifyContentScript here - it should be called from saveConfig with styleChangedGroup
+    StorageManager.notifyContentScript(activeGroups, preferences);
   };
   const getSiteEnabled = () => {
     const sitePref = preferences.sitePreferences?.[currentHost];

@@ -32,10 +32,6 @@ class POIStateManager {
       groupStyles: {},
       accentColor: '#d1ff00'
     };
-    this._nativeMode = false;
-    this._globalBounds = null;
-    this._globalMethod = 'searching...';
-    this._lastMessageTime = 0;
     this._initialized = false;
     
     // Cache for POI data to avoid slow storage reads
@@ -53,6 +49,11 @@ class POIStateManager {
     
     // Track last POIs sent to bridge for quick filtering
     this._bridgeLastPois = [];
+
+    // Bridge state (set by events.js from bridge messages)
+    this._globalBounds = null;
+    this._globalMethod = 'searching...';
+    this._lastMessageTime = 0;
   }
 
   // Getters and Setters for backwards compatibility
@@ -61,9 +62,6 @@ class POIStateManager {
 
   get preferences() { return this._preferences; }
   set preferences(val) { this._preferences = val; }
-
-  get nativeMode() { return this._nativeMode; }
-  set nativeMode(val) { this._nativeMode = val; }
 
   get globalBounds() { return this._globalBounds; }
   set globalBounds(val) { this._globalBounds = val; }
@@ -164,8 +162,11 @@ class POIStateManager {
       const lastSelected = Object.keys(this._lastActiveGroups).filter(k => this._lastActiveGroups[k]);
       const removed = lastSelected.filter(g => !selected.includes(g));
       
+      console.log(`[STATE] refresh(): selected=${JSON.stringify(selected)}, lastSelected=${JSON.stringify(lastSelected)}, removed=${JSON.stringify(removed)}, activeGroups=${JSON.stringify(this._activeGroups)}`);
+      
       // Handle empty selection - clear all
       if (selected.length === 0) {
+        console.log('[STATE] No active groups selected, clearing all POIs');
         this._clearAllPOIs();
         this._lastActiveGroups = { ...this._activeGroups };
         return;

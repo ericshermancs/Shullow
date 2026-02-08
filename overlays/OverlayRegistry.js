@@ -317,14 +317,6 @@ class OverlayRegistry {
                 console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain}`);
               }
               
-              // Also set global native mode flag
-              if (typeof window !== 'undefined' && window.poiState) {
-                window.poiState.nativeMode = true;
-                console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set window.poiState.nativeMode = true for ${domain}`);
-              }
-              
-              // Signal to content script
-              window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
               return; // Exit early if extension markers found
             }
           }
@@ -350,14 +342,6 @@ class OverlayRegistry {
                   console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain} (site markers)`);
                 }
                 
-                // Also set global native mode flag
-                if (typeof window !== 'undefined' && window.poiState) {
-                  window.poiState.nativeMode = true;
-                  console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set window.poiState.nativeMode = true for ${domain} (site markers)`);
-                }
-                
-                // Signal to content script
-                window.postMessage({ type: 'POI_NATIVE_ACTIVE' }, '*');
                 return; // Exit after first match
               }
             } catch (e) {
