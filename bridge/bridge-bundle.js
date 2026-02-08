@@ -959,25 +959,6 @@ var window = (() => {
           }
           return null;
         }
-        /**
-         * @override
-         * Gets the z-index for markers (higher for Zillow to ensure visibility)
-         * @returns {number} The z-index value
-         */
-        getMarkerZIndex() {
-          return 10;
-        }
-        /**
-         * @override
-         * Creates a marker element with Zillow-specific styling
-         * @param {Object} poi - POI object
-         * @returns {HTMLElement} The marker element
-         */
-        createMarkerElement(poi) {
-          const el = super.createMarkerElement(poi);
-          el.style.zIndex = "10";
-          return el;
-        }
       };
       if (typeof module !== "undefined" && module.exports) {
         module.exports = ZillowOverlay;
@@ -997,106 +978,6 @@ var window = (() => {
           this.reduxStore = null;
           this.reduxUnsubscribe = null;
           this._storeSubscribed = false;
-          this._startAggressiveNativeMarkerPolling();
-        }
-        /**
-         * Starts aggressive polling (100ms) specifically for Redfin
-         * Redfin renders pushpins very quickly so we need faster detection
-         * @private
-         */
-        _startAggressiveNativeMarkerPolling() {
-          if (typeof window === "undefined" || typeof document === "undefined") {
-            console.log("[RedfinOverlay] Cannot start aggressive polling: window or document undefined");
-            return;
-          }
-          if (this._aggressivePollInterval) {
-            console.log("[RedfinOverlay] Aggressive polling already running");
-            return;
-          }
-          console.log("[RedfinOverlay] Starting aggressive native marker polling (100ms)...");
-          this.log("Starting aggressive native marker polling (100ms) for Redfin...");
-          let lastDetectedCount = 0;
-          this._aggressivePollInterval = setInterval(() => {
-            try {
-              if (this._nativeMarkersInjected) {
-                console.log("[RedfinOverlay] Native markers already injected, stopping aggressive polling");
-                this._stopAggressiveNativeMarkerPolling();
-                return;
-              }
-              const selector = this._getNativeMarkerSelector();
-              if (!selector)
-                return;
-              const nativeMarkers = document.querySelectorAll(selector);
-              const count = nativeMarkers.length;
-              if (count > 0 && lastDetectedCount === 0) {
-                this._nativeMarkersInjected = true;
-                console.log(`[RedfinOverlay] Native markers detected by aggressive polling (${count} found)`);
-                this.log(`Redfin native markers detected by aggressive polling (${count} found), immediately clearing overlay`);
-                this.clear();
-                this._stopAggressiveNativeMarkerPolling();
-              }
-              lastDetectedCount = count;
-            } catch (e) {
-              console.error("[RedfinOverlay] Error during aggressive native marker polling:", e);
-              this.log("Error during aggressive native marker polling:", e);
-            }
-          }, 100);
-        }
-        /**
-         * Stops aggressive polling
-         * @private
-         */
-        _stopAggressiveNativeMarkerPolling() {
-          if (this._aggressivePollInterval) {
-            console.log("[RedfinOverlay] Stopping aggressive polling");
-            clearInterval(this._aggressivePollInterval);
-            this._aggressivePollInterval = null;
-          }
-        }
-        /**
-         * @override
-         * Gets the CSS selector for Redfin native markers
-         * Returns multiple selectors with increasing specificity to catch all variations
-         * @returns {string} CSS selector for Redfin pushpins
-         * @protected
-         */
-        _getNativeMarkerSelector() {
-          return '.Pushpin.homePushpin, [data-rf-test-id^="home-marker"], .Pushpin[class*="Pushpin"], [aria-label*="home"]';
-        }
-        /**
-         * @override
-         * Checks if Redfin has already placed a native marker for this POI
-         * @param {Object} poi - POI object
-         * @returns {boolean} True if Redfin native marker exists
-         */
-        _hasSiteNativeMarker(poi) {
-          if (typeof this._hasLoggedRedfinMarker === "undefined") {
-            this._hasLoggedRedfinMarker = false;
-          }
-          const lat = String(poi.latitude).trim();
-          const lng = String(poi.longitude).trim();
-          let selector = `.Pushpin.homePushpin[data-latitude="${lat}"][data-longitude="${lng}"]`;
-          let found = !!document.querySelector(selector);
-          if (!found) {
-            const pushpins = document.querySelectorAll(".Pushpin.homePushpin");
-            for (const pin of pushpins) {
-              const pinLat = pin.getAttribute("data-latitude");
-              const pinLng = pin.getAttribute("data-longitude");
-              if (pinLat && pinLng) {
-                const latDiff = Math.abs(parseFloat(lat) - parseFloat(pinLat));
-                const lngDiff = Math.abs(parseFloat(lng) - parseFloat(pinLng));
-                if (latDiff < 1e-5 && lngDiff < 1e-5) {
-                  found = true;
-                  break;
-                }
-              }
-            }
-          }
-          if (found && !this._hasLoggedRedfinMarker) {
-            this.log("Redfin native marker detected");
-            this._hasLoggedRedfinMarker = true;
-          }
-          return found;
         }
         /**
          * @override
@@ -1246,7 +1127,6 @@ var window = (() => {
          * Cleanup resources
          */
         cleanup() {
-          this._stopAggressiveNativeMarkerPolling();
           if (this.reduxUnsubscribe) {
             try {
               this.reduxUnsubscribe();
@@ -1818,64 +1698,7 @@ var window = (() => {
             }
           }
           this.log(`Registered map: ${id} for domain: ${domain}`);
-          if (overlay && typeof overlay._getNativeMarkerSelector === "function") {
-            this._performNativeMarkerCheck(overlay, domain);
-          }
           return entry;
-        }
-        /**
-         * Performs proactive native marker detection for a newly registered map
-         * This catches sites that have already rendered markers before the overlay initializes
-         * 
-         * @param {MapOverlayBase} overlay - The overlay instance
-         * @param {string} domain - The domain (for logging)
-         * @private
-         */
-        _performNativeMarkerCheck(overlay, domain) {
-          try {
-            setTimeout(() => {
-              try {
-                const selector = overlay._getNativeMarkerSelector?.();
-                if (selector) {
-                  const nativeMarkers = document.querySelectorAll(selector);
-                  if (nativeMarkers.length > 0) {
-                    console.log(`[OverlayRegistry] PRE-RENDER CHECK: Found ${nativeMarkers.length} extension native markers for ${domain}`);
-                    if (overlay) {
-                      overlay._nativeMarkersInjected = true;
-                      console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain}`);
-                    }
-                    return;
-                  }
-                }
-                const siteNativeSelectors = [
-                  "gmp-advanced-marker",
-                  '[class*="advanced-marker"]',
-                  ".mapboxgl-popup",
-                  "[data-marker-id]",
-                  '[class*="map-marker"]'
-                ];
-                for (const sel of siteNativeSelectors) {
-                  try {
-                    const siteMarkers = document.querySelectorAll(sel);
-                    if (siteMarkers.length > 0) {
-                      console.log(`[OverlayRegistry] PRE-RENDER CHECK: Found ${siteMarkers.length} site native markers (${sel}) for ${domain}`);
-                      if (overlay) {
-                        overlay._nativeMarkersInjected = true;
-                        console.log(`[OverlayRegistry] PRE-RENDER CHECK: Set _nativeMarkersInjected = true for ${domain} (site markers)`);
-                      }
-                      return;
-                    }
-                  } catch (e) {
-                  }
-                }
-                this.log(`PRE-RENDER CHECK: No native markers found yet for ${domain}`);
-              } catch (e) {
-                this.log(`Error in pre-render native marker check for ${domain}:`, e);
-              }
-            }, 500);
-          } catch (e) {
-            this.log(`Error scheduling native marker check for ${domain}:`, e);
-          }
         }
         /**
          * Gets a map entry by map instance
@@ -2025,11 +1848,9 @@ var window = (() => {
               domain: entry.domain,
               overlayClass: entry.overlay ? entry.overlay.constructor.name : "none",
               overlayId: entry.overlay ? entry.overlay.siteId : "none",
-              nativeMarkersInjected: entry.overlay ? entry.overlay._nativeMarkersInjected : "N/A",
               isActive: entry.isActive,
               createdAt: new Date(entry.createdAt).toISOString(),
-              lastUpdate: new Date(entry.lastUpdate).toISOString(),
-              poiCount: entry.overlay ? entry.overlay.pois ? entry.overlay.pois.length : 0 : 0
+              lastUpdate: new Date(entry.lastUpdate).toISOString()
             });
           });
           return info;
