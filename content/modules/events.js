@@ -89,10 +89,13 @@
         if (msg.activeGroups) state.activeGroups = msg.activeGroups;
         if (msg.preferences) state.preferences = msg.preferences;
         lastMessageUpdate = Date.now();
-        state._skipStorageRead = true; // Tell refresh() we already have the data
-        storageRefreshPending = false; // Cancel any pending storage refresh
+        state._skipStorageRead = true;
+        storageRefreshPending = false;
         if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
-        state.refresh().then(() => resp({ status: 'ok' }));
+        const styleChanged = !!(msg.preferences && msg.preferences.groupStyles);
+        const styleChangedGroup = msg.styleChangedGroup || null;
+        console.log(`[EVENTS] Message received: styleChanged=${styleChanged}, styleChangedGroup=${styleChangedGroup}, groupStyles=${Object.keys(msg.preferences?.groupStyles || {}).join(',')}`);
+        state.refresh({ styleChanged, styleChangedGroup }).then(() => resp({ status: 'ok' }));
       }
       return true;
     };

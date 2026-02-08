@@ -3319,11 +3319,14 @@ var window = (() => {
       if (!enabled)
         return;
       if (event.data && event.data.type === "POI_DATA_UPDATE") {
+        console.log(`[BRIDGE] POI_DATA_UPDATE received: ${event.data.pois.length} POIs`);
         let nativeRenderSuccess = false;
         if (window.overlayRegistry) {
           const entries = window.overlayRegistry.getActiveEntries();
+          console.log(`[BRIDGE] Found ${entries.length} active overlays`);
           for (const entry of entries) {
             if (entry.overlay && entry.mapInstance) {
+              console.log(`[BRIDGE] Calling renderMarkers on overlay: ${entry.overlay.constructor.name}`);
               entry.overlay.renderMarkers(event.data.pois, entry.mapInstance);
               const hasActiveMarkers = entry.overlay.activeMarkers && entry.overlay.activeMarkers.size > 0 || entry.overlay.activeElements && entry.overlay.activeElements.size > 0;
               if (hasActiveMarkers) {
@@ -3341,6 +3344,16 @@ var window = (() => {
             window.postMessage({ type: "POI_NATIVE_ACTIVE" }, "*");
           }
         }
+      }
+    });
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "POI_BRIDGE_ENABLE") {
+        if (event.data.enabled) {
+          startBridge();
+        } else {
+          stopBridge();
+        }
+        return;
       }
     });
     if (window.poiHijack)
@@ -3738,7 +3751,7 @@ var window = (() => {
       if (new.target === _MapOverlayBase) {
         throw new Error("MapOverlayBase is abstract and cannot be instantiated directly");
       }
-      console.log(`[${this.constructor.name}] Constructor called`);
+      console.log(`[${this.constructor.name}][${new.target.name}] Constructor called`);
       this.debug = debug;
       this.mapInstance = null;
       this.container = null;
@@ -4230,16 +4243,18 @@ var window = (() => {
               `;
                 return div;
               });
-              const color = poi.color || "#ff0000";
-              const secondaryColor = poi.secondaryColor || "#ffffff";
-              const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
-              el.style.backgroundImage = `url('${poi.logoData || svg}')`;
               el.setAttribute("data-id", id);
               el.setAttribute("data-lat", lat);
               el.setAttribute("data-lng", lng);
               self.activeElements.set(id, el);
               fragment.appendChild(el);
             }
+            const color = poi.color || "#ff0000";
+            const secondaryColor = poi.secondaryColor || "#ffffff";
+            const svg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+            el.style.backgroundImage = `url('${poi.logoData || svg}')`;
+            if (!el.hasAttribute("data-id"))
+              console.log(`[GOOGLE MAPS] Updated color for POI: ${id}, color=${color}`);
             el.style.transform = `translate(-50%, -100%) translate(${Math.round(pos.x)}px, ${Math.round(pos.y)}px)`;
           });
           if (fragment.childElementCount > 0) {
@@ -4263,6 +4278,7 @@ var window = (() => {
      * @param {Object} mapInstance - The map instance
      */
     renderMarkers(pois, mapInstance) {
+      console.log(`[GOOGLE MAPS] renderMarkers called: ${pois.length} POIs, activeElements=${this.activeElements.size}`);
       if (this._nativeMarkersInjected) {
         this.log("Native markers injected (flag set), skipping overlay render");
         return;
@@ -4484,6 +4500,7 @@ var window = (() => {
      * @param {Object} mapInstance - The map instance
      */
     renderMarkers(pois, mapInstance) {
+      console.log(`[MAPBOX] renderMarkers called: ${pois.length} POIs, activeMarkers=${this.activeMarkers.size}`);
       if (this._nativeMarkersInjected) {
         this.log("Native markers injected (flag set), skipping overlay render");
         return;
@@ -4522,6 +4539,16 @@ var window = (() => {
         const id = `${mapInstance._poiUid}-${MapUtils.getPoiId(poi)}`;
         usedIds.add(id);
         if (this.activeMarkers.has(id)) {
+          const marker2 = this.activeMarkers.get(id);
+          const el = marker2.getElement ? marker2.getElement() : null;
+          if (el) {
+            const color = poi.color || "#ff0000";
+            const secondaryColor = poi.secondaryColor || "#ffffff";
+            const logo = poi.logoData;
+            const fallbackSvg = MapUtils.generateFallbackSVG(color, secondaryColor, 32);
+            el.style.backgroundImage = `url('${logo || fallbackSvg}')`;
+            console.log(`[MAPBOX] Updated marker color: id=${id.substr(-8)}, color=${color}`);
+          }
           return;
         }
         const marker = this.createMarker(poi, mapInstance);

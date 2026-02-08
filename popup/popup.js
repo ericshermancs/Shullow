@@ -37,9 +37,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     previews.forEach(p => p.style.background = color);
   };
   const saveData = async () => {
-    console.log('[POI POPUP] saveData called');
     await StorageManager.saveState(preferences, activeGroups);
-    StorageManager.notifyContentScript(activeGroups, preferences);
+    // Note: Do NOT call notifyContentScript here - it should be called from saveConfig with styleChangedGroup
   };
   const getSiteEnabled = () => {
     const sitePref = preferences.sitePreferences?.[currentHost];
@@ -132,11 +131,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (currentEditingGroup === '__theme__') {
       preferences.accentColor = tempThemeColor;
       applyTheme(tempThemeColor);
+      await saveData();
     } else if (currentEditingGroup) {
       if (!preferences.groupStyles) preferences.groupStyles = {};
       preferences.groupStyles[currentEditingGroup] = { color: tempPriColor, secondaryColor: tempSecColor, logoData: currentLogoData };
+      await saveData();
+      console.log(`[POPUP] saveConfig: group=${currentEditingGroup}, newColor=${tempPriColor}`);
+      StorageManager.notifyContentScript(activeGroups, preferences, currentEditingGroup);
+    } else {
+      await saveData();
     }
-    await saveData();
     await renderGroups();
     hideModal();
     updateStatus('CONFIG SAVED');

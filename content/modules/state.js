@@ -141,36 +141,30 @@ class POIStateManager {
    * Refreshes POI data from storage and updates the manager
    * @returns {Promise<void>}
    */
-  async refresh() {
+  async refresh({ styleChanged = false, styleChangedGroup = null } = {}) {
     // Prevent concurrent refreshes - if already refreshing, queue this call
-    if (this._isRefreshing) {
-      console.log('[POI DEBUG] Refresh already in progress, skipping concurrent call');
-      return;
-    }
+      if (this._isRefreshing) {
+        return;
+      }
     
     this._isRefreshing = true;
-    const tGlobal0 = performance.now();
-    console.log('[POI DEBUG] ========== REFRESH START ==========');
     try {
-      const t0 = performance.now();
-      // Skip redundant storage read if message listener just updated (within 50ms)
+      console.log(`[STATE] refresh() START: styleChanged=${styleChanged}, styleChangedGroup=${styleChangedGroup}`);
       let skipStateRead = this._skipStorageRead;
-      this._skipStorageRead = false; // Reset flag
+      this._skipStorageRead = false;
+      if (styleChanged) {
+        this._poiCache = null;
+        this._poiCacheTime = 0;
+        console.log(`[STATE] Cache bypassed due to styleChanged`);
+      }
       
-      let t1 = performance.now();
       if (!skipStateRead) {
         // Fast path: Only read activeGroups and preferences, use cached POI data
-        const t0_1 = performance.now();
         const state = await chrome.storage.local.get(['activeGroups', 'preferences']);
-        t1 = performance.now();
-        console.log(`[POI DEBUG] Storage read took ${(t1-t0_1).toFixed(1)}ms`);
         
         // Update state
         if (state.activeGroups) this._activeGroups = state.activeGroups;
         if (state.preferences) this._preferences = { ...this._preferences, ...state.preferences };
-      } else {
-        t1 = performance.now();
-        console.log(`[POI DEBUG] Skipped storage read, using in-memory state`);
       }
 
       if (window.manager) {
@@ -178,6 +172,10 @@ class POIStateManager {
       }
 
       const selected = Object.keys(this._activeGroups).filter(k => this._activeGroups[k]);
+      console.log(`[STATE] Selected groups: ${selected.join(',')}`);
+      if (styleChanged && styleChangedGroup && window.manager?.removeMarkersForGroup) {
+        window.manager.removeMarkersForGroup(styleChangedGroup);
+      }
       
       // Detect what changed - if only one group was toggled off, we can optimize
       const lastSelected = Object.keys(this._lastActiveGroups).filter(k => this._lastActiveGroups[k]);
@@ -186,12 +184,9 @@ class POIStateManager {
       // onlyRemoved: only removing groups, not adding (works even if all removed)
       const onlyRemoved = removed.length > 0 && added.length === 0;
       
-      console.log(`[POI DEBUG] selected=${selected.join(',')}, last=${lastSelected.join(',')}, removed=${removed.join(',')}, added=${added.join(',')}, onlyRemoved=${onlyRemoved}, hasManager=${!!window.manager}, markerCount=${window.manager?.markerData.length || 0}`);
-      
       if (selected.length === 0) { 
         // OPTIMIZATION: If only removing groups, use fast path
         if (onlyRemoved && window.manager && window.manager.markerData.length > 0) {
-          console.log(`[POI OPTIMIZE] Removing all remaining groups`);
           if (window.manager) window.manager.markerData = [];
           if (window.manager) window.manager.render();
           window.postMessage({
@@ -199,8 +194,6 @@ class POIStateManager {
             pois: []
           }, '*');
           this._lastActiveGroups = { ...this._activeGroups };
-          const tEnd = performance.now();
-          console.log(`[POI PERF] optimized clear: total=${(tEnd-t0).toFixed(1)}ms`);
           return;
         }
         
@@ -214,26 +207,19 @@ class POIStateManager {
           pois: []
         }, '*');
         this._lastActiveGroups = { ...this._activeGroups };
-        console.log(`[POI PERF] refresh() cleared in ${(performance.now() - t0).toFixed(1)}ms`);
         return; 
       }
       
       // OPTIMIZATION: If only removing groups, filter existing data instead of rebuilding
       if (onlyRemoved) {
-        console.log(`[POI OPTIMIZE] ✓ Entering optimization path (not reading storage)`);
-        const tOpt1 = performance.now();
-        console.log(`[POI OPTIMIZE] Only removing groups: ${removed.join(', ')}, filtering existing data`);
-        
         // Remove markers for each removed group (no full re-render)
         if (window.manager && window.manager.markerData.length > 0) {
           removed.forEach(groupName => {
             window.manager.removeMarkersForGroup(groupName);
           });
-          const tOpt2 = performance.now();
           
           const filtered = window.manager.markerData.filter(p => !removed.includes(p.groupName));
           window.manager.markerData = filtered;
-          const tOpt3 = performance.now();
           
           // Also filter bridge data
           const bridgeFiltered = filtered.map(p => {
@@ -248,7 +234,6 @@ class POIStateManager {
               logoData: style.logoData
             };
           });
-          const tOpt4 = performance.now();
           
           window.postMessage({
             type: 'POI_DATA_UPDATE',
@@ -256,13 +241,8 @@ class POIStateManager {
           }, '*');
           
           this._lastActiveGroups = { ...this._activeGroups };
-          const tEnd = performance.now();
-          console.log(`[POI PERF] optimized removal: remove=${(tOpt2-tOpt1).toFixed(1)}ms, filter=${(tOpt3-tOpt2).toFixed(1)}ms, map=${(tOpt4-tOpt3).toFixed(1)}ms, bridge=${(tEnd-tOpt4).toFixed(1)}ms, total=${(tEnd-t0).toFixed(1)}ms, pois=${filtered.length}`);
         } else {
           // No manager or no markers, but still send bridge update
-          const tOpt2 = performance.now();
-          console.log(`[POI DEBUG] No manager to filter, sending bridge update only`);
-          
           // Still need to filter cached data for bridge if available
           const bridgeFiltered = (this._bridgeLastPois || []).filter(p => !removed.includes(p.groupName));
           this._bridgeLastPois = bridgeFiltered;
@@ -273,12 +253,8 @@ class POIStateManager {
           }, '*');
           
           this._lastActiveGroups = { ...this._activeGroups };
-          const tEnd = performance.now();
-          console.log(`[POI PERF] optimized removal (no manager): total=${(tEnd-t0).toFixed(1)}ms`);
         }
         this._isRefreshing = false;
-        const tGlobalEnd = performance.now();
-        console.log(`[POI DEBUG] ========== REFRESH END (optimized, wall time: ${(tGlobalEnd-tGlobal0).toFixed(1)}ms) ==========`);
         return;
       }
       
@@ -287,15 +263,12 @@ class POIStateManager {
       const cacheAge = Date.now() - this._poiCacheTime;
       if (this._poiCache && cacheAge < 60000) {
         poiGroups = this._poiCache;
-        console.log(`[POI CACHE] Using cached POI data (age: ${cacheAge}ms)`);
       } else {
         const data = await chrome.storage.local.get(['poiGroups']);
         poiGroups = data.poiGroups || {};
         this._poiCache = poiGroups;
         this._poiCacheTime = Date.now();
-        console.log(`[POI CACHE] Refreshed POI cache (reason: ${this._poiCache ? 'expired' : 'null'}, age: ${cacheAge}ms)`);
       }
-      const t2 = performance.now();
       
       // Optimize: Build POI array with styles in one pass (avoid double mapping)
       const all = [];
@@ -305,6 +278,7 @@ class POIStateManager {
         const groupPois = poiGroups[g] || [];
         const style = this._preferences.groupStyles[g] || {};
         const color = style.color || this._preferences.accentColor;
+        if (g === styleChangedGroup) console.log(`[STATE] Building POIs for ${g}: color=${color}`);
         const secondaryColor = style.secondaryColor || '#ffffff';
         const logoData = style.logoData;
         
@@ -325,26 +299,20 @@ class POIStateManager {
         });
       });
       
-      const t3 = performance.now();
       if (window.manager) window.manager.load(all);
-      const t4 = performance.now();
       
       // Bridge Sync: Send POI data to the main world for native rendering
       window.postMessage({
         type: 'POI_DATA_UPDATE',
         pois: bridgePois
       }, '*');
+      console.log(`[STATE] Bridge update sent: ${bridgePois.length} POIs, styleChangedGroup=${styleChangedGroup}`);
       
-      // Track last POIs sent for quick filtering on removal
       this._bridgeLastPois = bridgePois;
       
-      const t5 = performance.now();
       this._lastActiveGroups = { ...this._activeGroups };
-      console.log(`[POI PERF] refresh() complete: state=${(t1-t0).toFixed(1)}ms, poi=${(t2-t1).toFixed(1)}ms, process=${(t3-t2).toFixed(1)}ms, render=${(t4-t3).toFixed(1)}ms, bridge=${(t5-t4).toFixed(1)}ms, total=${(t5-t0).toFixed(1)}ms, pois=${all.length}`);
     } finally {
       this._isRefreshing = false;
-      const tGlobalEnd = performance.now();
-      console.log(`[POI DEBUG] ========== REFRESH END (total wall time: ${(tGlobalEnd-tGlobal0).toFixed(1)}ms) ==========`);
     }
   }
 

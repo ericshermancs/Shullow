@@ -26,8 +26,9 @@ export const StorageManager = {
       });
     });
   },
-  notifyContentScript(activeGroups, preferences) {
+  notifyContentScript(activeGroups, preferences, styleChangedGroup) {
     // Debounce: only send message once per 100ms to avoid multiple frames all receiving duplicate messages
+    console.log(`[STORAGE] notifyContentScript: styleChangedGroup=${styleChangedGroup}, has groupStyles=${!!preferences.groupStyles}`);
     if (this._notifyTimeout) {
       clearTimeout(this._notifyTimeout);
     }
@@ -38,7 +39,8 @@ export const StorageManager = {
           chrome.tabs.sendMessage(tabs[0].id, {
             action: 'update-active-groups',
             activeGroups,
-            preferences
+            preferences,
+            styleChangedGroup
           }, () => {
               if (chrome.runtime.lastError) console.log("Tab silent");
           });
