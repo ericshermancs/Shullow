@@ -5,9 +5,8 @@
  * Converted to OOP class extending ManagerBase for singleton pattern
  * and initialization lifecycle management.
  * 
- * NOTE: Redfin-specific logic (Redux store, RF_CONTEXT) has been extracted
- * to RedfinOverlay.js as per Phase 5.1. This class now only handles
- * generic discovery.
+ * NOTE: Site-specific logic is now handled by siteConfig.js which provides
+ * selectors, features flags, and Shadow DOM detection capabilities.
  * 
  * PHASE 6.5: This module now registers discovered maps with OverlayRegistry.
  * Domain detection happens AT DISCOVERY TIME, not globally.

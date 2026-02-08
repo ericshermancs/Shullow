@@ -9,7 +9,7 @@
  * - Loop continuously re-renders from cached POI data for any newly discovered maps
  * 
  * Rendering: ALL rendering goes through window.poiRenderer (poi-native-marker).
- * Overlay classes handle domain detection, bounds tracking, and site-specific hijack logic only.
+ * Site configurations from siteConfig.js provide per-site styles, selectors, and features.
  */
 (function() {
   const PREFIX = '[BRIDGE] ';
@@ -28,21 +28,15 @@
   }
 
   /**
-   * Initializes the overlay registry with factory
+   * Initializes the overlay registry
    * Only called once when all dependencies are ready
    */
   function initializeRegistry() {
     if (registryInitialized) return;
     
-    if (window.overlayRegistry && window.overlayFactory) {
-      // Link registry to factory
-      window.overlayRegistry.setFactory(window.overlayFactory);
-      
-      // Register all overlay classes from window
-      window.overlayFactory.registerFromWindow();
-      
+    if (window.overlayRegistry) {
       registryInitialized = true;
-      console.log(PREFIX + 'OverlayRegistry initialized with factory');
+      console.log(PREFIX + 'OverlayRegistry initialized');
     }
   }
 

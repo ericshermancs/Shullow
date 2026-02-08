@@ -1,19 +1,19 @@
 /**
- * OverlayRegistry.js - Registry for map instances and their associated overlays
+ * OverlayRegistry.js - Registry for map instances and their site configurations
  * 
  * CRITICAL: This registry implements Phase 6.5 - Multi-Map Isolation
  * 
  * Problem Being Solved:
  * When loading sites like realtor.com, scripts would read DOM elements and see
  * domains from iframes/ads (not realtor.com), which would overwrite the global
- * domain variable, causing the incorrect overlay class to be instantiated.
+ * domain variable, causing the incorrect configuration to be used.
  * 
  * Solution:
  * - Each map instance gets a unique ID at discovery time
  * - Domain detection happens at discovery time for THAT specific map
- * - The overlay assignment is locked to that map and cannot be changed
- * - Network requests cannot change the overlay assignment
- * - Each map maintains its own isolated overlay instance
+ * - The site config is locked to that map and cannot be changed
+ * - Network requests cannot change the site config assignment
+ * - Each map maintains its own isolated configuration
  */
 
 /**
@@ -24,13 +24,13 @@ class MapEntry {
    * @param {string} id - Unique map identifier
    * @param {Object} mapInstance - The map instance
    * @param {string} domain - Domain detected at discovery time
-   * @param {MapOverlayBase} overlay - The overlay instance
+   * @param {Object} siteConfig - The site configuration object
    */
-  constructor(id, mapInstance, domain, overlay) {
+  constructor(id, mapInstance, domain, siteConfig) {
     this.id = id;
     this.mapInstance = mapInstance;
     this.domain = domain;
-    this.overlay = overlay;
+    this.siteConfig = siteConfig;
     this.createdAt = Date.now();
     this.lastUpdate = Date.now();
     this.bounds = null;
@@ -56,20 +56,17 @@ class MapEntry {
    */
   deactivate() {
     this.isActive = false;
-    if (this.overlay && typeof this.overlay.cleanup === 'function') {
-      this.overlay.cleanup();
-    }
   }
 }
 
 /**
- * OverlayRegistry - Singleton registry for map-overlay associations
+ * OverlayRegistry - Singleton registry for map-siteConfig associations
  * 
  * Key guarantees:
  * 1. Domain is detected once at registration time
  * 2. Domain cannot be changed after registration
- * 3. Each map has exactly one overlay
- * 4. Network activity cannot affect domain/overlay assignments
+ * 3. Each map has exactly one site configuration
+ * 4. Network activity cannot affect domain/config assignments
  */
 class OverlayRegistry {
   constructor() {
@@ -91,11 +88,6 @@ class OverlayRegistry {
     this.idCounter = 0;
     
     /**
-     * Reference to the overlay factory
-     */
-    this.factory = null;
-    
-    /**
      * Debug mode
      */
     this.debug = false;
@@ -105,8 +97,11 @@ class OverlayRegistry {
    * Sets the overlay factory
    * @param {OverlayFactory} factory - The factory instance
    */
+  /**
+   * @deprecated No longer needed - using siteConfig directly
+   */
   setFactory(factory) {
-    this.factory = factory;
+    // No-op for backwards compatibility
   }
 
   /**
@@ -115,9 +110,6 @@ class OverlayRegistry {
    */
   setDebug(enabled) {
     this.debug = enabled;
-    if (this.factory) {
-      this.factory.setDebug(enabled);
-    }
   }
 
   /**
@@ -239,33 +231,24 @@ class OverlayRegistry {
     const domain = this._extractDomainFromMap(mapInstance, container);
     console.log('[OverlayRegistry] Extracted domain:', domain);
 
-    // Create overlay using factory or fallback
-    let overlay = null;
-    let overlayClassName = 'unknown';
-    if (this.factory) {
-      overlay = this.factory.createOverlay(domain);
-      if (overlay) overlayClassName = overlay.constructor.name;
-      console.log('[OverlayRegistry] Created overlay via this.factory:', overlayClassName, 'for domain:', domain);
-    } else if (typeof window.overlayFactory !== 'undefined' && window.overlayFactory) {
-      overlay = window.overlayFactory.createOverlay(domain);
-      if (overlay) overlayClassName = overlay.constructor.name;
-      console.log('[OverlayRegistry] Created overlay via window.overlayFactory:', overlayClassName, 'for domain:', domain);
-      // Fallback if overlay is still null
-      if (!overlay && typeof window.GenericMapOverlay !== 'undefined') {
-        overlay = new window.GenericMapOverlay();
-        overlayClassName = 'GenericMapOverlay (fallback)';
-        console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
-      }
-    } else if (typeof window.GenericMapOverlay !== 'undefined') {
-      overlay = new window.GenericMapOverlay();
-      overlayClassName = 'GenericMapOverlay (fallback)';
-      console.warn('[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:', domain);
+    // Get site configuration from siteConfig
+    let siteConfig = null;
+    if (window.siteConfig && typeof window.siteConfig.getConfig === 'function') {
+      siteConfig = window.siteConfig.getConfig(domain);
+      console.log('[OverlayRegistry] Loaded siteConfig for domain:', domain, siteConfig);
     } else {
-      console.warn('[OverlayRegistry] No overlay factory or GenericMapOverlay found for domain:', domain);
+      console.warn('[OverlayRegistry] window.siteConfig not available, using fallback');
+      siteConfig = {
+        displayName: domain || 'Unknown',
+        mapType: 'auto',
+        selectors: [],
+        styles: {},
+        features: {}
+      };
     }
 
     // Create entry
-    const entry = new MapEntry(id, mapInstance, domain, overlay);
+    const entry = new MapEntry(id, mapInstance, domain, siteConfig);
     console.log('[OverlayRegistry] MapEntry created:', entry);
 
     // Store in registries

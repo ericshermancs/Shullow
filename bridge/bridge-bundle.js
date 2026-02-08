@@ -134,7 +134,7 @@ var window = (() => {
           return this.pool.length;
         }
       };
-      var MapTypeDetector2 = class {
+      var MapTypeDetector = class {
         /**
          * Checks if the map instance is a Google Maps instance
          * @param {Object} map - Map instance to check
@@ -181,11 +181,12 @@ var window = (() => {
         }
       };
       if (typeof module !== "undefined" && module.exports) {
-        module.exports = { MapUtils, MarkerPool, MapTypeDetector: MapTypeDetector2 };
-      } else if (typeof window !== "undefined") {
+        module.exports = { MapUtils, MarkerPool, MapTypeDetector };
+      }
+      if (typeof window !== "undefined") {
         window.MapUtils = MapUtils;
         window.MarkerPool = MarkerPool;
-        window.MapTypeDetector = MapTypeDetector2;
+        window.MapTypeDetector = MapTypeDetector;
       }
     }
   });
@@ -928,396 +929,65 @@ var window = (() => {
     }
   });
 
-  // overlays/ZillowOverlay.js
-  var require_ZillowOverlay = __commonJS({
-    "overlays/ZillowOverlay.js"(exports, module) {
-      var ZillowOverlay = class extends MapboxOverlayBase {
-        constructor(debug = false) {
-          super(debug);
-          this.siteId = "zillow";
-        }
-        /**
-         * @override
-         * Detects the Zillow map container
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
+  // overlays/siteConfig.js
+  var require_siteConfig = __commonJS({
+    "overlays/siteConfig.js"(exports, module) {
+      var DEFAULT_STYLES = {
+        markerZIndex: 103,
+        markerHoverZIndex: 1e6,
+        containerZIndex: null,
+        markerOpacity: 1,
+        markerSize: 32
+      };
+      var SITE_CONFIG = {
+        "zillow.com": {
+          displayName: "Zillow",
+          mapType: "mapbox",
+          // Container detection - ordered by priority
+          selectors: [
             ".mapboxgl-map",
             "#search-page-map",
             '[data-testid="map"]',
             ".map-container",
             "#map"
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected Zillow map container:", selector);
-              this.container = el;
-              return el;
-            }
+          ],
+          // Style overrides (merged with DEFAULT_STYLES, null removes a key)
+          styles: {
+            // Inherits all defaults
+          },
+          // Special features
+          features: {
+            reduxStore: false,
+            shadowDOM: false,
+            boundsTracking: true
           }
-          return null;
-        }
-      };
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = ZillowOverlay;
-      } else if (typeof window !== "undefined") {
-        window.ZillowOverlay = ZillowOverlay;
-      }
-    }
-  });
-
-  // overlays/RedfinOverlay.js
-  var require_RedfinOverlay = __commonJS({
-    "overlays/RedfinOverlay.js"(exports, module) {
-      var RedfinOverlay = class extends GoogleMapsOverlayBase {
-        constructor(debug = false) {
-          super(debug);
-          this.siteId = "redfin";
-          this.reduxStore = null;
-          this.reduxUnsubscribe = null;
-          this._storeSubscribed = false;
-        }
-        /**
-         * @override
-         * Detects the Redfin map container
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
+        },
+        "redfin.com": {
+          displayName: "Redfin",
+          mapType: "google",
+          selectors: [
             ".gm-style",
             '[data-rf-test-id="map"]',
             "#map-container",
             ".MapContainer",
             ".HomeViews"
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected Redfin map container:", selector);
-              this.container = el;
-              return el;
-            }
+          ],
+          styles: {
+            // Could override here, e.g.: markerZIndex: 10000
+            // Or remove: containerZIndex: null
+          },
+          features: {
+            reduxStore: true,
+            // Redfin-specific: subscribe to Redux for bounds
+            shadowDOM: false,
+            boundsTracking: true
           }
-          return null;
-        }
-        /**
-         * @override
-         * Hijacks the map and sets up Redfin-specific subscriptions
-         * @param {Object} mapInstance - The map instance
-         * @returns {boolean} Success
-         */
-        hijack(mapInstance) {
-          const result = super.hijack(mapInstance);
-          if (result) {
-            this.subscribeToStore();
-          }
-          return result;
-        }
-        /**
-         * Subscribes to Redfin's Redux store for real-time bounds updates
-         */
-        subscribeToStore() {
-          if (this._storeSubscribed)
-            return;
-          try {
-            let store = window.App?.store || window.redfin?.context?.store;
-            if (!store) {
-              const root = document.getElementById("root") || document.querySelector("#content");
-              if (root) {
-                const key = Object.keys(root).find((k) => k.startsWith("__reactContainer"));
-                if (key && root[key]) {
-                  let fiber = root[key];
-                  while (fiber && !store) {
-                    if (fiber.stateNode && fiber.stateNode.store)
-                      store = fiber.stateNode.store;
-                    else if (fiber.memoizedProps && fiber.memoizedProps.store)
-                      store = fiber.memoizedProps.store;
-                    fiber = fiber.child || fiber.return;
-                  }
-                }
-              }
-            }
-            if (store) {
-              this.reduxStore = store;
-              const s = store.getState();
-              if (s?.map?.viewport?.bounds) {
-                window.poiPortal.update(s.map.viewport.bounds, "redfin-redux");
-              }
-              if (typeof store.subscribe === "function") {
-                let lastBounds = store.getState()?.map?.viewport?.bounds;
-                this.reduxUnsubscribe = store.subscribe(() => {
-                  const ns = store.getState();
-                  const newBounds = ns?.map?.viewport?.bounds;
-                  if (newBounds && newBounds !== lastBounds) {
-                    lastBounds = newBounds;
-                    window.poiPortal.update(newBounds, "redfin-redux-sub");
-                  }
-                });
-                this._storeSubscribed = true;
-                this.log("Subscribed to Redux store");
-              }
-            }
-          } catch (e) {
-            this.log("Failed to subscribe to Redux store:", e);
-          }
-        }
-        /**
-         * Extracts bounds from global variables (RF_CONTEXT, __map_bounds__)
-         * @returns {Object|null} Bounds object or null
-         */
-        extractGlobalBounds() {
-          try {
-            if (window.__map_bounds__ && window.poiPortal.lastPriority < 80) {
-              const b = window.__map_bounds__;
-              const keys = Object.keys(b).filter((k) => b[k] && typeof b[k].lo === "number" && typeof b[k].hi === "number");
-              if (keys.length >= 2) {
-                const b1 = b[keys[0]];
-                const b2 = b[keys[1]];
-                let latB, lngB;
-                if (b1.lo < 0 || Math.abs(b1.lo) > Math.abs(b2.lo)) {
-                  lngB = b1;
-                  latB = b2;
-                } else {
-                  lngB = b2;
-                  latB = b1;
-                }
-                return {
-                  north: latB.hi,
-                  south: latB.lo,
-                  east: lngB.hi,
-                  west: lngB.lo
-                };
-              }
-            }
-          } catch (e) {
-            this.log("Failed to extract global bounds:", e);
-          }
-          return null;
-        }
-        /**
-         * Parses Redfin API response for bounds data
-         * @param {Object} data - Parsed JSON response
-         * @returns {Object|null} Bounds object or null
-         */
-        parseNetworkBounds(data) {
-          try {
-            if (data?.payload?.viewport)
-              return data.payload.viewport;
-            if (data?.payload?.bounds)
-              return data.payload.bounds;
-          } catch (e) {
-            this.log("Failed to parse network bounds:", e);
-          }
-          return null;
-        }
-        /**
-         * Runs Redfin-specific discovery (global bounds extraction)
-         * This should be called periodically to supplement Redux subscription
-         */
-        runDiscovery() {
-          const bounds = this.extractGlobalBounds();
-          if (bounds) {
-            window.poiPortal.update(bounds, "redfin-global");
-          }
-        }
-        /**
-         * @override
-         * Cleanup resources
-         */
-        cleanup() {
-          if (this.reduxUnsubscribe) {
-            try {
-              this.reduxUnsubscribe();
-            } catch (e) {
-            }
-            this.reduxUnsubscribe = null;
-          }
-          this.reduxStore = null;
-          this._storeSubscribed = false;
-          super.cleanup();
-        }
-      };
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = RedfinOverlay;
-      } else if (typeof window !== "undefined") {
-        window.RedfinOverlay = RedfinOverlay;
-      }
-    }
-  });
-
-  // overlays/HomesComOverlay.js
-  var require_HomesComOverlay = __commonJS({
-    "overlays/HomesComOverlay.js"(exports, module) {
-      var HomesComOverlay = class extends GoogleMapsOverlayBase {
-        constructor(debug = false) {
-          super(debug);
-          this.siteId = "homes.com";
-        }
-        /**
-         * Finds elements matching selector within Shadow DOM
-         * @param {Node} root - Root node to search from
-         * @param {string} selector - CSS selector
-         * @param {Array} found - Accumulator array
-         * @returns {Array} Found elements
-         * @private
-         */
-        _findInShadow(root, selector, found = []) {
-          if (!root)
-            return found;
-          try {
-            const elements = root.querySelectorAll(selector);
-            elements.forEach((el) => found.push(el));
-            const all = root.querySelectorAll("*");
-            for (const s of all) {
-              if (s.shadowRoot) {
-                if (s.tagName.includes("ICON") || s.tagName.includes("BUTTON"))
-                  continue;
-                this._findInShadow(s.shadowRoot, selector, found);
-              }
-            }
-          } catch (e) {
-          }
-          return found;
-        }
-        /**
-         * @override
-         * Detects the Homes.com map container, including Shadow DOM
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
-            ".gm-style",
-            "#map-container",
-            ".map-container",
-            "gmp-map"
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected Homes.com map container:", selector);
-              this.container = el;
-              return el;
-            }
-          }
-          const shadowElements = this._findInShadow(document, "gmp-map, gmp-advanced-marker, .gm-style");
-          if (shadowElements.length > 0) {
-            const el = shadowElements[0];
-            this.log("Detected Homes.com map in Shadow DOM");
-            this.container = el;
-            return el;
-          }
-          return null;
-        }
-        /**
-         * @override
-         * Hijacks the map, handling Web Component maps
-         * @param {Object} mapInstance - The map instance
-         * @returns {boolean} Success
-         */
-        hijack(mapInstance) {
-          if (mapInstance && !mapInstance.getBounds && mapInstance.map) {
-            mapInstance = mapInstance.map;
-          }
-          if (mapInstance && !mapInstance.getBounds && mapInstance.innerMap) {
-            mapInstance = mapInstance.innerMap;
-          }
-          if (mapInstance && !mapInstance.getBounds && typeof mapInstance.getMap === "function") {
-            mapInstance = mapInstance.getMap();
-          }
-          return super.hijack(mapInstance);
-        }
-      };
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = HomesComOverlay;
-      } else if (typeof window !== "undefined") {
-        window.HomesComOverlay = HomesComOverlay;
-      }
-    }
-  });
-
-  // overlays/OneKeyOverlay.js
-  var require_OneKeyOverlay = __commonJS({
-    "overlays/OneKeyOverlay.js"(exports, module) {
-      var OneKeyOverlay = class extends MapboxOverlayBase {
-        constructor(debug = false) {
-          super(debug);
-          this.siteId = "onekey";
-        }
-        /**
-         * @override
-         * Detects the OneKey map container
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
-            ".mapboxgl-map",
-            "#map",
-            ".map-container",
-            '[class*="MapContainer"]'
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected OneKey map container:", selector);
-              this.container = el;
-              return el;
-            }
-          }
-          return null;
-        }
-      };
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = OneKeyOverlay;
-      } else if (typeof window !== "undefined") {
-        window.OneKeyOverlay = OneKeyOverlay;
-      }
-    }
-  });
-
-  // overlays/RealtorOverlay.js
-  var require_RealtorOverlay = __commonJS({
-    "overlays/RealtorOverlay.js"(exports, module) {
-      var RealtorOverlay = class extends MapOverlayBase {
-        constructor(debug = false) {
-          super(debug);
-          this.siteId = "realtor";
-          this.detectedMapType = null;
-        }
-        /**
-         * Finds elements matching selector within Shadow DOM
-         * @param {Node} root - Root node to search from
-         * @param {string} selector - CSS selector
-         * @param {Array} found - Accumulator array
-         * @returns {Array} Found elements
-         * @private
-         */
-        _findInShadow(root, selector, found = []) {
-          if (!root)
-            return found;
-          try {
-            const elements = root.querySelectorAll(selector);
-            elements.forEach((el) => found.push(el));
-            const all = root.querySelectorAll("*");
-            for (const s of all) {
-              if (s.shadowRoot) {
-                if (s.tagName.includes("ICON") || s.tagName.includes("BUTTON"))
-                  continue;
-                this._findInShadow(s.shadowRoot, selector, found);
-              }
-            }
-          } catch (e) {
-          }
-          return found;
-        }
-        /**
-         * @override
-         * Detects the Realtor.com map container
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
+        },
+        "realtor.com": {
+          displayName: "Realtor",
+          mapType: "auto",
+          // Can be either Google or Mapbox
+          selectors: [
             ".mapboxgl-map",
             ".gm-style",
             "gmp-map",
@@ -1325,177 +995,242 @@ var window = (() => {
             '[data-testid="map"]',
             ".map-container",
             "#mapboxgl-map"
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected Realtor map container:", selector);
-              this.container = el;
-              if (selector.includes("mapbox")) {
-                this.detectedMapType = "mapbox";
-              } else if (selector.includes("gm-style") || selector.includes("gmp-")) {
-                this.detectedMapType = "google";
-              }
-              return el;
-            }
+          ],
+          styles: {
+            // Inherits defaults
+          },
+          features: {
+            reduxStore: false,
+            shadowDOM: true,
+            // Realtor uses Shadow DOM
+            boundsTracking: true
           }
-          const shadowElements = this._findInShadow(document, "gmp-map, .gm-style, .mapboxgl-map");
-          if (shadowElements.length > 0) {
-            const el = shadowElements[0];
-            this.log("Detected Realtor map in Shadow DOM");
-            this.container = el;
-            return el;
-          }
-          return null;
-        }
-        /**
-         * @override
-         * Checks if the given map instance is compatible
-         * @param {Object} mapInstance - The map instance to check
-         * @returns {boolean} True if compatible
-         */
-        isCompatibleMap(mapInstance) {
-          if (MapTypeDetector.isGoogleMap(mapInstance)) {
-            this.detectedMapType = "google";
-            return true;
-          }
-          if (MapTypeDetector.isMapbox(mapInstance)) {
-            this.detectedMapType = "mapbox";
-            return true;
-          }
-          return false;
-        }
-        /**
-         * @override
-         * Cleanup resources
-         */
-        cleanup() {
-          this.detectedMapType = null;
-          super.cleanup();
-        }
-      };
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = RealtorOverlay;
-      } else if (typeof window !== "undefined") {
-        window.RealtorOverlay = RealtorOverlay;
-      }
-    }
-  });
-
-  // overlays/GenericMapOverlay.js
-  var require_GenericMapOverlay = __commonJS({
-    "overlays/GenericMapOverlay.js"(exports, module) {
-      var GenericMapOverlay = class extends MapOverlayBase {
-        constructor(debug = false) {
-          try {
-            super(debug);
-            console.log("[GenericMapOverlay] Constructor called");
-            this.siteId = "generic";
-            this.detectedMapType = null;
-            console.log("[GenericMapOverlay] Constructor complete");
-          } catch (err) {
-            console.error("[GenericMapOverlay] CRITICAL ERROR in constructor:", err);
-            throw err;
-          }
-        }
-        /**
-         * Override hijack to unwrap Web Component wrappers
-         * Some sites (like apartments.com) wrap the map in a Web Component (gmp-map)
-         * We need to unwrap it to get the actual Google Maps instance
-         * @param {Object} mapInstance - The map instance to hijack
-         * @returns {Object} - The result from parent hijack
-         */
-        hijack(mapInstance) {
-          console.log("[GenericMapOverlay] hijack() called with mapInstance:", {
-            type: typeof mapInstance,
-            constructor: mapInstance?.constructor?.name,
-            hasBounds: typeof mapInstance?.getBounds === "function"
-          });
-          if (mapInstance && !mapInstance.getBounds) {
-            if (mapInstance.map) {
-              console.log("[GenericMapOverlay] Unwrapping via .map property");
-              mapInstance = mapInstance.map;
-            } else if (mapInstance.innerMap) {
-              console.log("[GenericMapOverlay] Unwrapping via .innerMap property");
-              mapInstance = mapInstance.innerMap;
-            } else if (typeof mapInstance.getMap === "function") {
-              console.log("[GenericMapOverlay] Unwrapping via .getMap() method");
-              mapInstance = mapInstance.getMap();
-            }
-          }
-          console.log("[GenericMapOverlay] After unwrapping:", {
-            type: typeof mapInstance,
-            constructor: mapInstance?.constructor?.name,
-            hasBounds: typeof mapInstance?.getBounds === "function"
-          });
-          return super.hijack(mapInstance);
-        }
-        /**
-         * @override
-         * Detects map container using multiple fallback strategies
-         * @returns {HTMLElement|null} The map container element
-         */
-        detect() {
-          const selectors = [
+        },
+        "homes.com": {
+          displayName: "Homes.com",
+          mapType: "google",
+          selectors: [
             ".gm-style",
-            // Google Maps
-            ".mapboxgl-map",
-            // Mapbox GL JS
-            ".leaflet-container",
-            // Leaflet
-            "canvas",
-            // Canvas-based maps
-            "#map-container",
-            // Common ID
+            "#map",
             ".map-container",
-            // Common class
-            '[data-rf-test-id="map"]',
-            // Redfin specific
-            'div[class*="Map"]',
-            // Generic Map class
-            'div[class*="map"]'
-            // Generic map class (lowercase)
-          ];
-          for (const selector of selectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              this.log("Detected generic map container:", selector);
-              this.container = el;
-              return el;
+            '[data-testid="map"]'
+          ],
+          styles: {
+            // Inherits defaults
+            markerZIndex: -100
+          },
+          features: {
+            reduxStore: false,
+            shadowDOM: false,
+            boundsTracking: true
+          }
+        },
+        "onekeymls.com": {
+          displayName: "OneKey MLS",
+          mapType: "mapbox",
+          selectors: [
+            ".mapboxgl-map",
+            "#map",
+            ".map-container"
+          ],
+          styles: {
+            // Inherits defaults
+          },
+          features: {
+            reduxStore: false,
+            shadowDOM: false,
+            boundsTracking: true
+          }
+        },
+        // Default fallback for unknown sites
+        "default": {
+          displayName: "Generic",
+          mapType: "auto",
+          selectors: [
+            ".mapboxgl-map",
+            ".gm-style",
+            "gmp-map",
+            "#map",
+            '[role="application"]',
+            ".map-container"
+          ],
+          styles: {
+            // Uses DEFAULT_STYLES as-is
+          },
+          features: {
+            reduxStore: false,
+            shadowDOM: false,
+            boundsTracking: true
+          }
+        }
+      };
+      var DOMAIN_ALIASES = {
+        "www.zillow.com": "zillow.com",
+        "www.redfin.com": "redfin.com",
+        "www.homes.com": "homes.com",
+        "www.onekeymls.com": "onekeymls.com",
+        "www.realtor.com": "realtor.com"
+      };
+      var SiteConfigManager = class {
+        constructor() {
+          this.config = SITE_CONFIG;
+          this.aliases = DOMAIN_ALIASES;
+          this.defaultStyles = DEFAULT_STYLES;
+          this.debug = false;
+          console.log("[SiteConfig] Initialized with", Object.keys(this.config).length, "site configs");
+        }
+        setDebug(enabled) {
+          this.debug = enabled;
+        }
+        log(...args) {
+          if (this.debug) {
+            console.log("[SiteConfig]", ...args);
+          }
+        }
+        /**
+         * Merges site-specific styles with defaults
+         * - Starts with DEFAULT_STYLES
+         * - Applies site-specific overrides
+         * - Removes keys where site value is null
+         */
+        _mergeStyles(siteStyles) {
+          const merged = { ...this.defaultStyles };
+          if (!siteStyles)
+            return merged;
+          for (const [key, value] of Object.entries(siteStyles)) {
+            if (value === null) {
+              delete merged[key];
+            } else {
+              merged[key] = value;
+            }
+          }
+          return merged;
+        }
+        /**
+         * Normalizes a domain (removes www, applies aliases)
+         */
+        normalizeDomain(domain) {
+          if (!domain)
+            return "default";
+          let normalized = domain.toLowerCase().trim();
+          if (this.aliases[normalized]) {
+            normalized = this.aliases[normalized];
+          }
+          if (normalized.startsWith("www.")) {
+            normalized = normalized.substring(4);
+          }
+          return normalized;
+        }
+        /**
+         * Gets configuration for a domain with merged styles
+         */
+        getConfig(domain) {
+          const normalized = this.normalizeDomain(domain);
+          this.log(`Getting config for domain: ${domain} (normalized: ${normalized})`);
+          let siteConfig = null;
+          if (this.config[normalized]) {
+            siteConfig = this.config[normalized];
+            this.log(`Exact match for ${normalized}`);
+          } else {
+            for (const [key, value] of Object.entries(this.config)) {
+              if (key !== "default" && (normalized.includes(key) || key.includes(normalized))) {
+                this.log(`Partial match: ${normalized} -> ${key}`);
+                siteConfig = value;
+                break;
+              }
+            }
+          }
+          if (!siteConfig) {
+            this.log(`No match for ${normalized}, using default`);
+            siteConfig = this.config.default;
+          }
+          const result = {
+            ...siteConfig,
+            domain: normalized,
+            styles: this._mergeStyles(siteConfig.styles)
+          };
+          this.log(`Config result for ${domain}:`, result);
+          return result;
+        }
+        /**
+         * Detects a map container for the given domain
+         */
+        detectContainer(domain) {
+          const config = this.getConfig(domain);
+          if (config.features.shadowDOM) {
+            return this._detectInShadowDOM(config.selectors);
+          }
+          for (const selector of config.selectors) {
+            try {
+              const el = document.querySelector(selector);
+              if (el) {
+                this.log(`Detected container for ${domain}: ${selector}`);
+                return el;
+              }
+            } catch (e) {
             }
           }
           return null;
         }
         /**
-         * @override
-         * Checks if the given map instance is compatible (Google or Mapbox)
-         * @param {Object} mapInstance - The map instance to check
-         * @returns {boolean} True if compatible
+         * Searches for elements within Shadow DOM
          */
-        isCompatibleMap(mapInstance) {
-          if (MapTypeDetector.isGoogleMap(mapInstance)) {
-            this.detectedMapType = "google";
-            return true;
+        _detectInShadowDOM(selectors, root = document.body, found = null) {
+          if (!root)
+            return found;
+          try {
+            if (!found) {
+              for (const selector of selectors) {
+                const elements = root.querySelectorAll(selector);
+                if (elements.length > 0) {
+                  found = elements[0];
+                  break;
+                }
+              }
+            }
+            if (!found) {
+              const all = root.querySelectorAll("*");
+              for (const el of all) {
+                if (el.shadowRoot) {
+                  if (el.tagName.includes("ICON") || el.tagName.includes("BUTTON")) {
+                    continue;
+                  }
+                  found = this._detectInShadowDOM(selectors, el.shadowRoot, found);
+                  if (found)
+                    break;
+                }
+              }
+            }
+          } catch (e) {
           }
-          if (MapTypeDetector.isMapbox(mapInstance)) {
-            this.detectedMapType = "mapbox";
-            return true;
-          }
-          return false;
+          return found;
         }
         /**
-         * @override
-         * Cleanup resources
+         * Applies site-specific styles to markers
          */
-        cleanup() {
-          this.detectedMapType = null;
-          super.cleanup();
+        applyMarkerStyles(element, domain, isHover = false) {
+          const config = this.getConfig(domain);
+          const zIndex = isHover ? config.styles.markerHoverZIndex : config.styles.markerZIndex;
+          if (zIndex !== null) {
+            element.style.zIndex = zIndex.toString();
+          }
+        }
+        /**
+         * Gets all configured sites
+         */
+        getAllSites() {
+          return Object.keys(this.config).filter((k) => k !== "default");
         }
       };
       if (typeof module !== "undefined" && module.exports) {
-        module.exports = GenericMapOverlay;
-      } else if (typeof window !== "undefined") {
-        window.GenericMapOverlay = GenericMapOverlay;
+        module.exports = { DEFAULT_STYLES, SITE_CONFIG, DOMAIN_ALIASES, SiteConfigManager };
+      }
+      if (typeof window !== "undefined") {
+        window.DEFAULT_STYLES = DEFAULT_STYLES;
+        window.SITE_CONFIG = SITE_CONFIG;
+        window.DOMAIN_ALIASES = DOMAIN_ALIASES;
+        window.SiteConfigManager = SiteConfigManager;
+        window.siteConfig = new SiteConfigManager();
       }
     }
   });
@@ -1508,13 +1243,13 @@ var window = (() => {
          * @param {string} id - Unique map identifier
          * @param {Object} mapInstance - The map instance
          * @param {string} domain - Domain detected at discovery time
-         * @param {MapOverlayBase} overlay - The overlay instance
+         * @param {Object} siteConfig - The site configuration object
          */
-        constructor(id, mapInstance, domain, overlay) {
+        constructor(id, mapInstance, domain, siteConfig) {
           this.id = id;
           this.mapInstance = mapInstance;
           this.domain = domain;
-          this.overlay = overlay;
+          this.siteConfig = siteConfig;
           this.createdAt = Date.now();
           this.lastUpdate = Date.now();
           this.bounds = null;
@@ -1536,9 +1271,6 @@ var window = (() => {
          */
         deactivate() {
           this.isActive = false;
-          if (this.overlay && typeof this.overlay.cleanup === "function") {
-            this.overlay.cleanup();
-          }
         }
       };
       var OverlayRegistry = class {
@@ -1546,15 +1278,16 @@ var window = (() => {
           this.entries = /* @__PURE__ */ new Map();
           this.instanceToId = /* @__PURE__ */ new WeakMap();
           this.idCounter = 0;
-          this.factory = null;
           this.debug = false;
         }
         /**
          * Sets the overlay factory
          * @param {OverlayFactory} factory - The factory instance
          */
+        /**
+         * @deprecated No longer needed - using siteConfig directly
+         */
         setFactory(factory) {
-          this.factory = factory;
         }
         /**
          * Enable/disable debug logging
@@ -1562,9 +1295,6 @@ var window = (() => {
          */
         setDebug(enabled) {
           this.debug = enabled;
-          if (this.factory) {
-            this.factory.setDebug(enabled);
-          }
         }
         /**
          * Log helper
@@ -1663,31 +1393,21 @@ var window = (() => {
           const id = this.generateId();
           const domain = this._extractDomainFromMap(mapInstance, container);
           console.log("[OverlayRegistry] Extracted domain:", domain);
-          let overlay = null;
-          let overlayClassName = "unknown";
-          if (this.factory) {
-            overlay = this.factory.createOverlay(domain);
-            if (overlay)
-              overlayClassName = overlay.constructor.name;
-            console.log("[OverlayRegistry] Created overlay via this.factory:", overlayClassName, "for domain:", domain);
-          } else if (typeof window.overlayFactory !== "undefined" && window.overlayFactory) {
-            overlay = window.overlayFactory.createOverlay(domain);
-            if (overlay)
-              overlayClassName = overlay.constructor.name;
-            console.log("[OverlayRegistry] Created overlay via window.overlayFactory:", overlayClassName, "for domain:", domain);
-            if (!overlay && typeof window.GenericMapOverlay !== "undefined") {
-              overlay = new window.GenericMapOverlay();
-              overlayClassName = "GenericMapOverlay (fallback)";
-              console.warn("[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:", domain);
-            }
-          } else if (typeof window.GenericMapOverlay !== "undefined") {
-            overlay = new window.GenericMapOverlay();
-            overlayClassName = "GenericMapOverlay (fallback)";
-            console.warn("[OverlayRegistry] Fallback: Created GenericMapOverlay for domain:", domain);
+          let siteConfig = null;
+          if (window.siteConfig && typeof window.siteConfig.getConfig === "function") {
+            siteConfig = window.siteConfig.getConfig(domain);
+            console.log("[OverlayRegistry] Loaded siteConfig for domain:", domain, siteConfig);
           } else {
-            console.warn("[OverlayRegistry] No overlay factory or GenericMapOverlay found for domain:", domain);
+            console.warn("[OverlayRegistry] window.siteConfig not available, using fallback");
+            siteConfig = {
+              displayName: domain || "Unknown",
+              mapType: "auto",
+              selectors: [],
+              styles: {},
+              features: {}
+            };
           }
-          const entry = new MapEntry(id, mapInstance, domain, overlay);
+          const entry = new MapEntry(id, mapInstance, domain, siteConfig);
           console.log("[OverlayRegistry] MapEntry created:", entry);
           this.entries.set(id, entry);
           this.instanceToId.set(mapInstance, id);
@@ -1879,226 +1599,6 @@ var window = (() => {
     }
   });
 
-  // overlays/overlayFactory.js
-  var require_overlayFactory = __commonJS({
-    "overlays/overlayFactory.js"(exports, module) {
-      var OverlayFactory = class {
-        constructor() {
-          this.overlayClasses = {};
-          this.config = null;
-          this.debug = false;
-        }
-        /**
-         * Enable/disable debug logging
-         * @param {boolean} enabled - Debug flag
-         */
-        setDebug(enabled) {
-          this.debug = enabled;
-        }
-        /**
-         * Log helper
-         * @param {...any} args - Arguments to log
-         */
-        log(...args) {
-          if (this.debug) {
-            console.log("[OverlayFactory]", ...args);
-          }
-        }
-        /**
-         * Loads the overlay configuration
-         * In a browser extension context, this may be embedded or fetched
-         * @param {Object} [configOverride] - Optional config to use instead of fetching
-         */
-        loadConfig(configOverride = null) {
-          if (configOverride) {
-            this.config = configOverride;
-            return;
-          }
-          this.config = {
-            sites: {
-              "zillow.com": { overlay: "ZillowOverlay", mapType: "mapbox", priority: 100 },
-              "redfin.com": { overlay: "RedfinOverlay", mapType: "google", priority: 100 },
-              "homes.com": { overlay: "HomesComOverlay", mapType: "google", priority: 100 },
-              "onekeymls.com": { overlay: "OneKeyOverlay", mapType: "mapbox", priority: 100 },
-              "realtor.com": { overlay: "RealtorOverlay", mapType: "auto", priority: 100 }
-            },
-            defaults: { overlay: "GenericMapOverlay", mapType: "auto", priority: 1 },
-            domainAliases: {
-              "www.zillow.com": "zillow.com",
-              "www.redfin.com": "redfin.com",
-              "www.homes.com": "homes.com",
-              "www.onekeymls.com": "onekeymls.com",
-              "www.realtor.com": "realtor.com"
-            }
-          };
-        }
-        /**
-         * Registers an overlay class with the factory
-         * @param {string} name - Class name (e.g., 'ZillowOverlay')
-         * @param {Function} overlayClass - The overlay class constructor
-         */
-        registerOverlay(name, overlayClass) {
-          this.overlayClasses[name] = overlayClass;
-          this.log(`Registered overlay: ${name}`);
-        }
-        /**
-         * Registers all known overlay classes from the window object
-         * Call this after all overlay scripts have loaded
-         */
-        registerFromWindow() {
-          const overlayNames = [
-            "ZillowOverlay",
-            "RedfinOverlay",
-            "HomesComOverlay",
-            "OneKeyOverlay",
-            "RealtorOverlay",
-            "GenericMapOverlay",
-            "MapOverlayBase",
-            "GoogleMapsOverlayBase",
-            "MapboxOverlayBase"
-          ];
-          for (const name of overlayNames) {
-            if (typeof window[name] === "function") {
-              this.registerOverlay(name, window[name]);
-            }
-          }
-        }
-        /**
-         * Normalizes a domain name (removes www, handles aliases)
-         * @param {string} domain - The domain to normalize
-         * @returns {string} Normalized domain
-         */
-        normalizeDomain(domain) {
-          if (!domain)
-            return "";
-          domain = domain.toLowerCase();
-          if (this.config && this.config.domainAliases && this.config.domainAliases[domain]) {
-            return this.config.domainAliases[domain];
-          }
-          if (domain.startsWith("www.")) {
-            domain = domain.substring(4);
-          }
-          return domain;
-        }
-        /**
-         * Gets the site configuration for a domain
-         * @param {string} domain - The domain to look up
-         * @returns {Object} Site config or defaults
-         */
-        getSiteConfig(domain) {
-          if (!this.config) {
-            this.loadConfig();
-          }
-          const normalized = this.normalizeDomain(domain);
-          if (this.config.sites[normalized]) {
-            return this.config.sites[normalized];
-          }
-          for (const siteDomain of Object.keys(this.config.sites)) {
-            if (normalized.endsWith(siteDomain) || normalized.includes(siteDomain)) {
-              return this.config.sites[siteDomain];
-            }
-          }
-          return this.config.defaults;
-        }
-        /**
-         * Creates an overlay instance for the given domain
-         * @param {string} domain - The domain to create an overlay for
-         * @returns {MapOverlayBase|null} The overlay instance, or null if unavailable
-         */
-        createOverlay(domain) {
-          const siteConfig = this.getSiteConfig(domain);
-          const overlayName = siteConfig.overlay;
-          console.log(`Creating overlay for ${domain}: ${overlayName}`);
-          const OverlayClass = this.overlayClasses[overlayName];
-          if (!OverlayClass) {
-            this.log(`Overlay class not found: ${overlayName}, falling back to GenericMapOverlay`);
-            const FallbackClass = this.overlayClasses["GenericMapOverlay"];
-            if (FallbackClass) {
-              return new FallbackClass(this.debug);
-            }
-            return null;
-          }
-          return new OverlayClass(this.debug);
-        }
-        /**
-         * Creates an overlay for a specific map instance, determining domain
-         * from the map's container element context.
-         * 
-         * This is the key method for Phase 6.5 - it determines the domain
-         * at discovery time based on the map's location in the DOM, not
-         * from global state that could be polluted by iframes/ads.
-         * 
-         * @param {Object} mapInstance - The map instance
-         * @param {HTMLElement} [container] - Optional container element
-         * @returns {MapOverlayBase|null} The overlay instance
-         */
-        createOverlayForMap(mapInstance, container = null) {
-          let domain = null;
-          if (container && container.ownerDocument) {
-            try {
-              domain = container.ownerDocument.location?.hostname;
-            } catch (e) {
-            }
-          }
-          if (!domain && mapInstance) {
-            try {
-              if (typeof mapInstance.getDiv === "function") {
-                const div = mapInstance.getDiv();
-                domain = div?.ownerDocument?.location?.hostname;
-              } else if (mapInstance._container) {
-                domain = mapInstance._container.ownerDocument?.location?.hostname;
-              } else if (mapInstance.container) {
-                const c = mapInstance.container;
-                const el = typeof c === "string" ? document.getElementById(c) : c;
-                domain = el?.ownerDocument?.location?.hostname;
-              }
-            } catch (e) {
-              this.log("Failed to extract domain from map:", e);
-            }
-          }
-          if (!domain) {
-            try {
-              if (window === window.top) {
-                domain = window.location.hostname;
-              }
-            } catch (e) {
-            }
-          }
-          if (!domain) {
-            this.log("Could not determine domain for map, using generic overlay");
-            domain = "";
-          }
-          return this.createOverlay(domain);
-        }
-        /**
-         * Gets all registered overlay class names
-         * @returns {string[]} Array of overlay class names
-         */
-        getRegisteredOverlays() {
-          return Object.keys(this.overlayClasses);
-        }
-        /**
-         * Gets all configured site domains
-         * @returns {string[]} Array of domain names
-         */
-        getConfiguredSites() {
-          if (!this.config) {
-            this.loadConfig();
-          }
-          return Object.keys(this.config.sites);
-        }
-      };
-      var overlayFactory = new OverlayFactory();
-      overlayFactory.loadConfig();
-      if (typeof module !== "undefined" && module.exports) {
-        module.exports = { OverlayFactory, overlayFactory };
-      } else if (typeof window !== "undefined") {
-        window.OverlayFactory = OverlayFactory;
-        window.overlayFactory = overlayFactory;
-      }
-    }
-  });
-
   // bridge/main.js
   (function() {
     const PREFIX = "[BRIDGE] ";
@@ -2121,11 +1621,9 @@ var window = (() => {
     function initializeRegistry() {
       if (registryInitialized)
         return;
-      if (window.overlayRegistry && window.overlayFactory) {
-        window.overlayRegistry.setFactory(window.overlayFactory);
-        window.overlayFactory.registerFromWindow();
+      if (window.overlayRegistry) {
         registryInitialized = true;
-        console.log(PREFIX + "OverlayRegistry initialized with factory");
+        console.log(PREFIX + "OverlayRegistry initialized");
       }
     }
     let loopCount = 0;
@@ -2331,6 +1829,60 @@ var window = (() => {
     activeMarkers: /* @__PURE__ */ new Map(),
     // Map<id, NativeMarker>
     lastPoiData: [],
+    configCache: /* @__PURE__ */ new WeakMap(),
+    // Cache configs per map instance
+    siteConfigReady: false,
+    /**
+     * Checks if siteConfig is ready and initializes it
+     */
+    ensureSiteConfig() {
+      if (this.siteConfigReady)
+        return true;
+      if (window.siteConfig && typeof window.siteConfig.getConfig === "function") {
+        this.siteConfigReady = true;
+        console.log("[Renderer] siteConfig ready");
+        return true;
+      }
+      return false;
+    },
+    /**
+     * Gets the domain for a map instance
+     */
+    getMapDomain(map) {
+      try {
+        if (typeof map.getDiv === "function") {
+          const div = map.getDiv();
+          if (div && div.ownerDocument && div.ownerDocument.location) {
+            return div.ownerDocument.location.hostname;
+          }
+        }
+        if (map._container && map._container.ownerDocument && map._container.ownerDocument.location) {
+          return map._container.ownerDocument.location.hostname;
+        }
+        if (window === window.top) {
+          return window.location.hostname;
+        }
+      } catch (e) {
+      }
+      return "";
+    },
+    /**
+     * Gets site configuration for a map (cached per map instance)
+     */
+    getSiteConfig(map) {
+      if (this.configCache.has(map)) {
+        return this.configCache.get(map);
+      }
+      if (!this.ensureSiteConfig()) {
+        console.warn("[Renderer] siteConfig not ready yet, using defaults");
+        const defaults = { styles: { markerZIndex: 5e3, markerHoverZIndex: 1e6 } };
+        return defaults;
+      }
+      const domain = this.getMapDomain(map);
+      const config = window.siteConfig.getConfig(domain);
+      this.configCache.set(map, config);
+      return config;
+    },
     clear() {
       this.lastPoiData = [];
       this.activeMarkers.forEach((marker) => {
@@ -2427,17 +1979,21 @@ var window = (() => {
             this.container.addEventListener("mouseenter", (e) => {
               const target = e.target.closest(".poi-native-marker");
               if (target) {
-                target.style.zIndex = "1000000";
+                const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                target.style.zIndex = (config.styles.markerHoverZIndex || 1e6).toString();
                 const id = target.getAttribute("data-id");
                 const lat = parseFloat(target.getAttribute("data-lat"));
                 const lng = parseFloat(target.getAttribute("data-lng"));
-                window.postMessage({ type: "POI_MARKER_HOVER", id, lat, lng }, "*");
+                const message = { type: "POI_MARKER_HOVER", id, lat, lng };
+                console.log("[Renderer] Posting hover event:", message);
+                window.postMessage(message, "*");
               }
             }, true);
             this.container.addEventListener("mouseleave", (e) => {
               const target = e.target.closest(".poi-native-marker");
               if (target) {
-                target.style.zIndex = "102";
+                const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                target.style.zIndex = (config.styles.markerZIndex || 5e3).toString();
                 const id = target.getAttribute("data-id");
                 window.postMessage({ type: "POI_MARKER_LEAVE", id }, "*");
               }
@@ -2489,10 +2045,12 @@ var window = (() => {
                 } else {
                   el = document.createElement("div");
                   el.className = "poi-native-marker";
+                  const config = window.poiRenderer.getSiteConfig(this.mapInstance);
+                  const baseZIndex = config.styles.markerZIndex || 5e3;
                   el.style.cssText = `
                         position: absolute; width: 32px; height: 32px;
                         background-size: contain; background-repeat: no-repeat;
-                        pointer-events: auto; cursor: pointer; z-index: 102;
+                        pointer-events: auto; cursor: pointer; z-index: ${baseZIndex};
                         will-change: transform; top: 0; left: 0;
                         filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));
                       `;
@@ -2554,8 +2112,10 @@ var window = (() => {
            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="${color}" stroke="${secondaryColor}" stroke-width="1"/>
          </svg>
        `)}`;
+        const config = this.getSiteConfig(map);
+        const baseZIndex = config.styles.markerZIndex || 5e3;
         el.style.cssText = `
-         width: 32px; height: 32px; cursor: pointer; z-index: 5000;
+         width: 32px; height: 32px; cursor: pointer; z-index: ${baseZIndex};
          background-image: url('${logo || fallbackSvg}');
          background-size: contain; background-repeat: no-repeat;
          filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));
@@ -2565,11 +2125,14 @@ var window = (() => {
           window.postMessage({ type: "POI_MARKER_CLICK", id: poi.id, lat: poi.latitude, lng: poi.longitude }, "*");
         };
         el.onmouseenter = () => {
-          el.style.zIndex = "1000000";
-          window.postMessage({ type: "POI_MARKER_HOVER", id: poi.id, lat: poi.latitude, lng: poi.longitude }, "*");
+          const hoverZIndex = config.styles.markerHoverZIndex || 1e6;
+          el.style.zIndex = hoverZIndex.toString();
+          const message = { type: "POI_MARKER_HOVER", id: poi.id, lat: poi.latitude, lng: poi.longitude };
+          console.log("[Renderer] Posting hover event (Mapbox):", message);
+          window.postMessage(message, "*");
         };
         el.onmouseleave = () => {
-          el.style.zIndex = "5000";
+          el.style.zIndex = baseZIndex.toString();
           window.postMessage({ type: "POI_MARKER_LEAVE", id: poi.id }, "*");
         };
         const marker = new window.mapboxgl.Marker({ element: el }).setLngLat([parseFloat(poi.longitude), parseFloat(poi.latitude)]).addTo(map);
@@ -2584,246 +2147,8 @@ var window = (() => {
     }
   };
 
-  // overlays/MapOverlayBase.js
-  var MapOverlayBase2 = class _MapOverlayBase {
-    /**
-     * Creates a new MapOverlayBase instance
-     * @param {boolean} debug - Enable debug logging
-     */
-    constructor(debug = false) {
-      if (new.target === _MapOverlayBase) {
-        throw new Error("MapOverlayBase is abstract and cannot be instantiated directly");
-      }
-      console.log(`[${this.constructor.name}][${new.target.name}] Constructor called`);
-      this.debug = debug;
-      this.mapInstance = null;
-      this.container = null;
-      this.isActive = false;
-      this.mapId = null;
-      this.domain = null;
-      this.detectedAt = null;
-    }
-    /**
-     * Logs debug messages if debug mode is enabled
-     * @param {...any} args - Arguments to log
-     */
-    log(...args) {
-      if (this.debug) {
-        console.log(`[${this.constructor.name}]`, ...args);
-      }
-    }
-    /**
-     * Generates a unique map ID for this overlay instance
-     * @returns {string} Unique map identifier
-     */
-    generateMapId() {
-      return `map_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
-    // ============================================
-    // Abstract Methods - Must be implemented by subclasses
-    // ============================================
-    /**
-     * Detects and returns the map container element for this site
-     * @abstract
-     * @returns {HTMLElement|null} The map container element or null if not found
-     */
-    detect() {
-      throw new Error("Must implement detect() - returns the map container element");
-    }
-    /**
-     * Checks if the given map instance is compatible with this overlay
-     * @abstract
-     * @param {Object} mapInstance - The map instance to check
-     * @returns {boolean} True if compatible, false otherwise
-     */
-    isCompatibleMap(mapInstance) {
-      throw new Error("Must implement isCompatibleMap(mapInstance)");
-    }
-    // ============================================
-    // Core Lifecycle Methods
-    // ============================================
-    /**
-     * Hijacks/initializes the map instance for this overlay
-     * Called after detect() successfully finds a container
-     * @param {Object} mapInstance - The map instance to hijack
-     */
-    hijack(mapInstance) {
-      if (!mapInstance) {
-        this.log("hijack() called with null map instance");
-        return false;
-      }
-      if (!this.isCompatibleMap(mapInstance)) {
-        this.log("Map instance is not compatible with this overlay");
-        return false;
-      }
-      this.mapInstance = mapInstance;
-      this.mapId = this.generateMapId();
-      this.detectedAt = Date.now();
-      this.isActive = true;
-      this.log("Map hijacked successfully, mapId:", this.mapId);
-      return true;
-    }
-    /**
-     * Clears overlay state (no rendering to clear — handled by renderer.js)
-     */
-    clear() {
-      this.log("Clear called");
-    }
-    /**
-     * Cleans up the overlay and releases resources
-     */
-    cleanup() {
-      this.clear();
-      this.mapInstance = null;
-      this.container = null;
-      this.isActive = false;
-      this.log("Overlay cleaned up");
-    }
-    /**
-     * Gets the current map bounds
-     * @returns {Object|null} Bounds object with north, south, east, west or null
-     */
-    getBounds() {
-      if (!this.mapInstance)
-        return null;
-      try {
-        const b = this.mapInstance.getBounds();
-        if (!b)
-          return null;
-        if (b.getNorthEast && b.getSouthWest) {
-          return {
-            north: b.getNorthEast().lat(),
-            south: b.getSouthWest().lat(),
-            east: b.getNorthEast().lng(),
-            west: b.getSouthWest().lng()
-          };
-        }
-        if (b.getNorth) {
-          return {
-            north: b.getNorth(),
-            south: b.getSouth(),
-            east: b.getEast(),
-            west: b.getWest()
-          };
-        }
-      } catch (e) {
-        this.log("Error getting bounds:", e);
-      }
-      return null;
-    }
-    /**
-     * Filters POIs to only those within the current map bounds
-     * @param {Array} pois - Array of POI objects
-     * @returns {Array} Filtered POIs within bounds
-     */
-    filterByBounds(pois) {
-      const bounds = this.getBounds();
-      if (!bounds)
-        return pois;
-      return pois.filter((poi) => {
-        const lat = parseFloat(poi.latitude);
-        const lng = parseFloat(poi.longitude);
-        return lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east;
-      });
-    }
-  };
-  if (typeof window !== "undefined") {
-    window.MapOverlayBase = MapOverlayBase2;
-  }
-
-  // overlays/GoogleMapsOverlayBase.js
-  var GoogleMapsOverlayBase2 = class extends MapOverlayBase {
-    /**
-     * Creates a new GoogleMapsOverlayBase instance
-     * @param {boolean} debug - Enable debug logging
-     */
-    constructor(debug = false) {
-      super(debug);
-      this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
-    }
-    /**
-     * @override
-     * Checks if the given map instance is a Google Maps instance
-     * @param {Object} mapInstance - The map instance to check
-     * @returns {boolean} True if Google Maps
-     */
-    isCompatibleMap(mapInstance) {
-      return MapTypeDetector.isGoogleMap(mapInstance);
-    }
-    /**
-     * @override
-     * Cleanup resources
-     */
-    cleanup() {
-      super.cleanup();
-    }
-  };
-  if (typeof window !== "undefined") {
-    window.GoogleMapsOverlayBase = GoogleMapsOverlayBase2;
-  }
-
-  // overlays/MapboxOverlayBase.js
-  var MapboxOverlayBase2 = class extends MapOverlayBase {
-    /**
-     * Creates a new MapboxOverlayBase instance
-     * @param {boolean} debug - Enable debug logging
-     */
-    constructor(debug = false) {
-      super(debug);
-      this.log(`[${this.constructor.name}] instance created. Debug:`, debug);
-    }
-    /**
-     * @override
-     * Checks if the given map instance is a Mapbox GL JS instance
-     * @param {Object} mapInstance - The map instance to check
-     * @returns {boolean} True if Mapbox GL JS
-     */
-    isCompatibleMap(mapInstance) {
-      return MapTypeDetector.isMapbox(mapInstance);
-    }
-    /**
-     * @override
-     * Gets the current map bounds from a Mapbox map
-     * @returns {Object|null} Bounds object with north, south, east, west or null
-     */
-    getBounds() {
-      if (!this.mapInstance)
-        return null;
-      try {
-        const b = this.mapInstance.getBounds();
-        if (!b)
-          return null;
-        return {
-          north: b.getNorth(),
-          south: b.getSouth(),
-          east: b.getEast(),
-          west: b.getWest()
-        };
-      } catch (e) {
-        this.log("Error getting bounds:", e);
-      }
-      return null;
-    }
-    /**
-     * @override
-     * Cleanup resources
-     */
-    cleanup() {
-      super.cleanup();
-    }
-  };
-  if (typeof window !== "undefined") {
-    window.MapboxOverlayBase = MapboxOverlayBase2;
-  }
-
   // bridge/entry.js
-  var import_ZillowOverlay = __toESM(require_ZillowOverlay());
-  var import_RedfinOverlay = __toESM(require_RedfinOverlay());
-  var import_HomesComOverlay = __toESM(require_HomesComOverlay());
-  var import_OneKeyOverlay = __toESM(require_OneKeyOverlay());
-  var import_RealtorOverlay = __toESM(require_RealtorOverlay());
-  var import_GenericMapOverlay = __toESM(require_GenericMapOverlay());
+  var import_siteConfig = __toESM(require_siteConfig());
   var import_OverlayRegistry = __toESM(require_OverlayRegistry());
-  var import_overlayFactory = __toESM(require_overlayFactory());
 })();
 //# sourceMappingURL=bridge-bundle.js.map

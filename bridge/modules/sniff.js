@@ -15,7 +15,7 @@
  * Migration:
  * - All bounds tracking now comes from:
  *   1. hijack.js: 'idle'/'moveend' event listeners (Google Maps and Mapbox)
- *   2. RedfinOverlay: Redux store subscription for real-time updates
+ *   2. siteConfig.js: Site-specific features flags for special behaviors
  *   3. portal.js: Priority-based bounds locking prevents low-quality data
  * 
  * This file is kept for reference but is NOT loaded by entry.js
@@ -170,7 +170,7 @@ class NetworkSnifferManager extends ManagerBase {
         try {
           const data = JSON.parse(body);
           
-          // Note: Redfin-specific parsing moved to RedfinOverlay per Phase 5.1
+          // Note: Site-specific parsing handled by siteConfig.js features
           // This is generic bounds finding only
           
           const found = this.findBounds(data);
