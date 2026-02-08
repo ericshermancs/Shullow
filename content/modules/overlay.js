@@ -96,7 +96,7 @@ class OverlayManager {
     const type = (attrType && attrType !== 'none') ? attrType : 'searching...';
 
     this.debugPanel.innerHTML = `
-      <b style="color:#fff; border-bottom:1px solid ${state.preferences.accentColor}; display:block; margin-bottom:5px;">POI TITAN (v12.10)</b>
+      <b style="color:#fff; border-bottom:1px solid ${state.preferences.accentColor}; display:block; margin-bottom:5px;">Shullow (v12.10)</b>
       STATUS: <span style="color:${state.preferences.accentColor}">ACTIVE</span><br>
       BRIDGE: <span style="color:${bridgeStatus === 'OFFLINE' ? 'red' : 'green'}">${bridgeStatus}</span><br>
       PROBE: <span style="color:#f39c12">${type}</span><br>

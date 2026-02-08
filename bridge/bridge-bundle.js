@@ -224,7 +224,7 @@ var window = (() => {
         attachListeners(instance) {
           if (!instance || instance._poiListener)
             return;
-          console.log("[POI TITAN] Attaching listeners to captured instance");
+          console.log("[Shullow] Attaching listeners to captured instance");
           let target = instance;
           if (!target.addListener && !target.on) {
             if (target.map && (target.map.addListener || target.map.on))
@@ -277,7 +277,7 @@ var window = (() => {
               instance._poiListener = true;
             }
           } catch (e) {
-            console.error("[POI TITAN] Failed to attach listeners", e);
+            console.error("[Shullow] Failed to attach listeners", e);
           }
         }
         /**
@@ -407,7 +407,7 @@ var window = (() => {
                   proto[method] = function(...args) {
                     if (this && typeof this.getDiv === "function" && typeof this.getBounds === "function") {
                       if (window.poiHijack && window.poiHijack.activeMaps && !window.poiHijack.activeMaps.has(this)) {
-                        console.log("[POI TITAN] Backdoor capture via", method);
+                        console.log("[Shullow] Backdoor capture via", method);
                         window.poiHijack.activeMaps.add(this);
                         window.poiHijack.attachListeners(this);
                       }
