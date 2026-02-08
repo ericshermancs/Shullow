@@ -149,9 +149,14 @@ class POIStateManager {
       
       // Update state from storage if needed
       if (!this._skipStorageRead) {
-        const state = await chrome.storage.local.get(['activeGroups', 'preferences']);
-        if (state.activeGroups) this._activeGroups = state.activeGroups;
-        if (state.preferences) this._preferences = { ...this._preferences, ...state.preferences };
+        try {
+          const state = await chrome.storage.local.get(['activeGroups', 'preferences']);
+          if (state.activeGroups) this._activeGroups = state.activeGroups;
+          if (state.preferences) this._preferences = { ...this._preferences, ...state.preferences };
+        } catch (e) {
+          // Extension context invalidated (reload/update) - use cached state
+          console.warn('[STATE] Extension context invalidated, using cached state');
+        }
       }
       this._skipStorageRead = false;
 

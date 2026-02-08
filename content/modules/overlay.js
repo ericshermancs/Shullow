@@ -49,6 +49,7 @@ class OverlayManager {
       font-family: monospace; font-size: 11px; padding: 12px;
       border-radius: 6px; pointer-events: auto; z-index: 2147483647;
       border: 1px solid ${window.poiState.preferences.accentColor}; line-height: 1.5;
+      display: none;
     `;
     
     if (getComputedStyle(this.container).position === 'static') {

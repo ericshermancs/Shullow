@@ -64,6 +64,15 @@
       if (state) {
         if (msg.preferences) state.preferences = msg.preferences;
         state._skipStorageRead = false; // Force storage read to get latest siteEnabled
+
+        // If extension was dormant (page loaded with site OFF), boot it now
+        if (msg.enabled && window.__poiDormant && !window.__poiBooted) {
+          console.log('[EVENTS] Site toggled ON from dormant state, booting extension');
+          if (typeof bootExtension === 'function') {
+            bootExtension(state);
+          }
+        }
+
         state.refresh().then(() => resp({ status: 'ok' }));
       } else {
         resp({ status: 'no-state' });
@@ -86,6 +95,21 @@
 
     if (changes.preferences) {
       state.preferences = { ...state.preferences, ...(changes.preferences.newValue || {}) };
+
+      // Check if site was just enabled from dormant state
+      if (window.__poiDormant && !window.__poiBooted) {
+        const host = window.location.hostname;
+        const newPrefs = changes.preferences.newValue || {};
+        const sitePref = newPrefs.sitePreferences?.[host] || {};
+        const nowEnabled = (typeof sitePref.siteEnabled === 'boolean')
+          ? sitePref.siteEnabled
+          : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+        if (nowEnabled && typeof bootExtension === 'function') {
+          console.log('[EVENTS] Storage: Site enabled from dormant state, booting extension');
+          bootExtension(state);
+        }
+      }
+
       if (window.manager && !skipRefresh) {
         window.manager.updateVisibility();
         window.manager.render();

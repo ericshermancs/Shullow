@@ -7,29 +7,53 @@
  * - state.refresh() sends POI_DATA_UPDATE to bridge via window.postMessage
  * - Bridge announces POI_BRIDGE_READY → events.js triggers state.refresh()
  * - Popup messages and storage changes also trigger state.refresh() via events.js
+ * 
+ * If the site is disabled at page load, NO code runs and NO DOM is modified.
+ * The events listener (events.js) stays active so toggling ON can boot the extension live.
  */
 (async function() {
   // Skip iframes — only run in the top-level frame where the map lives
   if (window !== window.top) return;
-
-  console.log('POI Main: Content script loaded.');
 
   // Get or create state manager singleton
   const state = window.getPoiStateManager
     ? window.getPoiStateManager()
     : (window.poiState = new POIStateManager());
 
-  // Initialize state from storage FIRST before starting any loops
+  // Initialize state from storage FIRST before doing anything
   await state.initializeState();
-  console.log('POI Main: State initialized. Active groups:', 
+
+  // Check if site is disabled — if so, do NOTHING (no DOM changes, no loops, no bridge)
+  const host = window.location.hostname;
+  const sitePref = state.preferences.sitePreferences?.[host] || {};
+  const siteEnabled = (typeof sitePref.siteEnabled === 'boolean')
+    ? sitePref.siteEnabled
+    : (typeof sitePref.overlayEnabled === 'boolean' ? sitePref.overlayEnabled : true);
+
+  if (!siteEnabled) {
+    console.log('POI Main: Site is disabled, skipping all initialization.');
+    // Mark as dormant — events.js toggle-site-enabled handler will boot us
+    window.__poiDormant = true;
+    return;
+  }
+
+  bootExtension(state);
+})();
+
+/**
+ * Boots the full extension: stability loop, bridge injection.
+ * Called on initial load (if enabled) or when toggled ON via events.js.
+ */
+function bootExtension(state) {
+  // Prevent double-boot
+  if (window.__poiBooted) return;
+  window.__poiBooted = true;
+  window.__poiDormant = false;
+
+  console.log('POI Main: Content script loaded. Active groups:', 
     Object.keys(state.activeGroups).filter(k => state.activeGroups[k]));
 
   // Stability Loop: Monitors for map container presence/change.
-  // This is the primary driver — when a new container is detected,
-  // state.refresh() sends POI data to the bridge.
-  // NOTE: We do NOT call state.refresh() eagerly here. The first refresh
-  // happens either when a container is detected (below) or when the bridge
-  // announces readiness (via POI_BRIDGE_READY in events.js).
   setInterval(() => {
     const d = MapDetector.detectContainer();
     if (d) {
@@ -62,4 +86,4 @@
   } catch (e) {
     console.error('POI Main: Failed to inject bridge bundle', e);
   }
-})();
+}
