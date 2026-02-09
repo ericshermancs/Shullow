@@ -1,4 +1,4 @@
-import { loadPOIGroups, savePOIs, importData, deletePOIGroup, renamePOIGroup } from '../data/data-manager.js';
+import { loadPOIGroups, savePOIs, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData } from '../data/data-manager.js';
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
 
@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const hostnameDisplay = document.getElementById('current-hostname');
   const newGroupNameInput = document.getElementById('new-group-name');
   const csvUploadInput = document.getElementById('csv-upload');
+  const exportBtn = document.getElementById('export-btn');
 
   let preferences = {
     overlayEnabled: true,
@@ -290,20 +291,90 @@ document.addEventListener('DOMContentLoaded', async () => {
   csvUploadInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const groupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const pois = importData(ev.target.result, file.name.endsWith('.json') ? 'json' : 'csv');
-      if (pois.length) {
-        await savePOIs(pois, groupName);
-        // Add new group to activeGroups as active and notify content script
-        activeGroups[groupName] = true;
-        await saveData();
-        newGroupNameInput.value = '';
-        await renderGroups();
-        updateStatus('IMPORTED ' + pois.length);
+      try {
+        const content = ev.target.result;
+        
+        // Try to parse as JSON first to check if it's an export file
+        let isExportFormat = false;
+        try {
+          const jsonData = JSON.parse(content);
+          // Check if it's our export format (array with name, icon, colors, data)
+          if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0].data && jsonData[0].name) {
+            isExportFormat = true;
+            const importedCount = await importGroupsData(jsonData);
+            if (importedCount > 0) {
+              // Mark all imported groups as active
+              const groups = await loadPOIGroups();
+              for (const groupName of Object.keys(groups)) {
+                if (activeGroups[groupName] === undefined) {
+                  activeGroups[groupName] = true;
+                }
+              }
+              // Reload preferences to get the updated group styles
+              const state = await StorageManager.loadState();
+              if (state.preferences) {
+                preferences = { ...preferences, ...state.preferences };
+              }
+              await saveData();
+              newGroupNameInput.value = '';
+              await renderGroups();
+              updateStatus(`IMPORTED ${importedCount} GROUPS`);
+              return;
+            }
+          }
+        } catch (e) {
+          // Not JSON or not export format, continue with regular import
+        }
+        
+        // Regular CSV/JSON import
+        if (!isExportFormat) {
+          const groupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+          const pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
+          if (pois.length) {
+            await savePOIs(pois, groupName);
+            activeGroups[groupName] = true;
+            await saveData();
+            newGroupNameInput.value = '';
+            await renderGroups();
+            updateStatus('IMPORTED ' + pois.length);
+          }
+        }
+      } catch (err) {
+        console.error('Import error:', err);
+        updateStatus('IMPORT FAILED');
       }
     };
     reader.readAsText(file);
+    e.target.value = ''; // Reset input
+  };
+
+  // Export button handler
+  exportBtn.onclick = async () => {
+    try {
+      const exportData = await exportGroupsData();
+      if (exportData.length === 0) {
+        updateStatus('NO GROUPS TO EXPORT');
+        return;
+      }
+      
+      // Create blob and download
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+      a.download = `shullow-export-${timestamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      updateStatus(`EXPORTED ${exportData.length} GROUPS`);
+    } catch (err) {
+      console.error('Export error:', err);
+      updateStatus('EXPORT FAILED');
+    }
   };
 });

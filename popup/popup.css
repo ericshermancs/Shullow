@@ -397,6 +397,57 @@ input:checked + .slider:before {
   background: rgba(209, 255, 0, 0.1);
   padding: 2px 6px;
   border-radius: 10px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.count-export-wrapper {
+  position: relative;
+  display: inline-block;
+  min-width: 60px;
+  height: 22px;
+}
+
+.count-export-wrapper .count {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.count-export-wrapper .export-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+  pointer-events: none;
+  font-size: 0.65rem;
+  color: var(--accent-color);
+  background: rgba(209, 255, 0, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: opacity 0.3s ease, transform 0.3s ease, background 0.2s ease;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+
+.count-export-wrapper:hover .count {
+  opacity: 0;
+  transform: scale(0.9);
+  pointer-events: none;
+}
+
+.count-export-wrapper:hover .export-btn {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.count-export-wrapper .export-btn:hover {
+  background: rgba(209, 255, 0, 0.2);
+  border-color: var(--accent-color);
 }
 
 /* Modal Styles */

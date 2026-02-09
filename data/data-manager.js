@@ -93,3 +93,98 @@ export async function deletePOIGroup(groupName, useSyncStorage = false) {
     console.error('Error deleting group:', error);
   }
 }
+
+/**
+ * Exports all groups with their data, icons, and color preferences.
+ * Returns an array of group objects ready to be saved as JSON.
+ */
+export async function exportGroupsData(useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['poiGroups', 'preferences']);
+    const poiGroups = data.poiGroups || {};
+    const preferences = data.preferences || {};
+    const groupStyles = preferences.groupStyles || {};
+    
+    const exportData = [];
+    
+    for (const [groupName, pois] of Object.entries(poiGroups)) {
+      const style = groupStyles[groupName] || {};
+      
+      // Convert POI data to CSV string
+      if (pois.length > 0) {
+        const headers = Object.keys(pois[0]);
+        const csvLines = [headers.join(',')];
+        
+        pois.forEach(poi => {
+          const values = headers.map(h => {
+            const val = poi[h];
+            // Quote strings that contain commas
+            if (typeof val === 'string' && val.includes(',')) {
+              return `"${val}"`;
+            }
+            return val;
+          });
+          csvLines.push(values.join(','));
+        });
+        
+        exportData.push({
+          name: groupName,
+          icon: style.logoData || null,
+          colors: {
+            primary: style.color || '#d1ff00',
+            secondary: style.secondaryColor || '#ffffff'
+          },
+          data: csvLines.join('\n')
+        });
+      }
+    }
+    
+    return exportData;
+  } catch (error) {
+    console.error('Error exporting groups:', error);
+    return [];
+  }
+}
+
+/**
+ * Imports groups from exported format.
+ * Handles the special export format with icon, colors, and CSV data.
+ */
+export async function importGroupsData(exportedGroups, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['poiGroups', 'preferences']);
+    const poiGroups = data.poiGroups || {};
+    const preferences = data.preferences || {};
+    if (!preferences.groupStyles) preferences.groupStyles = {};
+    
+    let importedCount = 0;
+    
+    for (const group of exportedGroups) {
+      if (!group.name || !group.data) continue;
+      
+      // Parse the CSV data
+      const pois = parseCSV(group.data);
+      if (pois.length > 0) {
+        poiGroups[group.name] = pois;
+        
+        // Import group styles
+        preferences.groupStyles[group.name] = {
+          color: group.colors?.primary || '#d1ff00',
+          secondaryColor: group.colors?.secondary || '#ffffff',
+          logoData: group.icon || null
+        };
+        
+        importedCount++;
+      }
+    }
+    
+    await storage.set({ poiGroups, preferences });
+    console.log(`Imported ${importedCount} groups with styles`);
+    return importedCount;
+  } catch (error) {
+    console.error('Error importing groups:', error);
+    return 0;
+  }
+}
