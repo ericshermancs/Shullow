@@ -48,7 +48,7 @@
         <input type="text" id="new-group-name" placeholder="GROUP NAME">
         <div class="file-input-wrapper">
           <input type="file" id="csv-upload" accept=".csv,.json" style="display: none;">
-          <label for="csv-upload" class="btn-primary" style="margin: 0; display: block; text-align: center; font-size: 0.6rem;">UPLOAD</label>
+          <label for="csv-upload" class="btn-primary" style="margin: 0; display: block; text-align: center; font-size: 0.6rem; cursor:pointer">UPLOAD</label>
         </div>
       </div>
     </section>
@@ -56,7 +56,10 @@
     <section class="groups">
       <div class="section-header">
         <h2>GROUPS</h2>
-        <span class="count" id="group-count">0</span>
+        <div class="count-export-wrapper">
+          <span class="count" id="group-count">0</span>
+          <button class="export-btn" id="export-btn" title="Export all groups. Export file can be uploaded using the upload button above.">EXPORT</button>
+        </div>
       </div>
       <div id="groups-container" class="groups-list">
         <!-- Dynamically populated -->
