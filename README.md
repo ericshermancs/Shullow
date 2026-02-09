@@ -101,8 +101,6 @@ CONTENT WORLD (Isolated)          MAIN WORLD (Page Context)
 
 ```
 ├── manifest.json              # Extension manifest (MV3)
-├── background/
-│   └── background.js          # Service worker
 ├── bridge/                     # MAIN world context (page access)
 │   ├── main.js                # Initialization and loop
 │   ├── entry.js               # Entry point

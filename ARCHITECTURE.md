@@ -135,8 +135,6 @@ Loop renders via:
 ```
 ├── manifest.json                    # Extension manifest (MV3)
 │
-├── background/
-│   └── background.js               # Service worker (minimal, mostly unused)
 │
 ├── bridge/                          # MAIN world context (page execution)
 │   ├── main.js                      # Orchestrator & loop
