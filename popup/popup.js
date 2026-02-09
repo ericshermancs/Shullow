@@ -72,12 +72,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const secondaryWheel = new ColorWheel('secondary-wheel-container', '#ffffff', (hex) => { tempSecColor = hex; });
   const themeWheel = new ColorWheel('theme-wheel-container', '#d1ff00', (hex) => { tempThemeColor = hex; });
 
-  const showModal = (groupName) => {
-    currentEditingGroup = groupName;
+  const showModal = (groupUuid, groupName) => {
+    currentEditingGroup = groupUuid;
     themeFields.style.display = 'none';
     groupFields.style.display = 'block';
     
-    if (groupName === '__theme__') {
+    if (groupUuid === '__theme__') {
       modalTitle.textContent = 'CUSTOMIZE THEME';
       themeFields.style.display = 'block';
       groupFields.style.display = 'none';
@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       themeWheel.setColor(tempThemeColor);
     } else {
       modalTitle.textContent = `CUSTOMIZE: ${groupName.toUpperCase()}`;
-      const style = preferences.groupStyles[groupName] || { color: '#d1ff00', secondaryColor: '#ffffff', logoData: null };
+      const style = preferences.groupStyles[groupUuid] || { color: '#d1ff00', secondaryColor: '#ffffff', logoData: null };
       tempPriColor = style.color || '#d1ff00';
       tempSecColor = style.secondaryColor || '#ffffff';
       currentLogoData = style.logoData;
@@ -161,23 +161,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   const renderGroups = async () => {
     try {
       const groups = await loadPOIGroups();
-      const names = Object.keys(groups);
-      groupCountEl.textContent = names.length;
-      if (names.length === 0) { groupsContainer.innerHTML = '<div class="empty-state">NO GROUPS FOUND</div>'; return; }
+      const uuids = Object.keys(groups);
+      groupCountEl.textContent = uuids.length;
+      if (uuids.length === 0) { groupsContainer.innerHTML = '<div class="empty-state">NO GROUPS FOUND</div>'; return; }
       groupsContainer.innerHTML = '';
-      names.sort().forEach(name => {
-        const style = preferences.groupStyles[name] || { color: '#d1ff00', secondaryColor: '#ffffff' };
-        const isActive = activeGroups[name] !== false;
+      
+      // Sort by group name
+      const sortedEntries = uuids.map(uuid => ({ uuid, group: groups[uuid] }))
+        .sort((a, b) => a.group.name.localeCompare(b.group.name));
+      
+      sortedEntries.forEach(({ uuid, group }) => {
+        const style = preferences.groupStyles[uuid] || { color: '#d1ff00', secondaryColor: '#ffffff' };
+        const isActive = activeGroups[uuid] !== false;
         const icon = style.logoData ? `<img src="${style.logoData}" class="pin-icon">` : PIN_SVG(style.color, style.secondaryColor || '#ffffff');
         const item = document.createElement('div');
         item.className = 'group-item';
         item.innerHTML = `
-          <div class="pin-preview" data-group="${name}">${icon}</div>
-          <span class="group-name" data-group="${name}">${name}</span>
+          <div class="pin-preview" data-uuid="${uuid}" data-name="${group.name}">${icon}</div>
+          <span class="group-name" data-uuid="${uuid}">${group.name}</span>
           <div class="group-actions">
-            <button class="delete-btn" data-group="${name}">&times;</button>
+            <button class="delete-btn" data-uuid="${uuid}" data-name="${group.name}">&times;</button>
             <label class="switch">
-              <input type="checkbox" class="group-toggle" data-group="${name}" ${isActive ? 'checked' : ''}>
+              <input type="checkbox" class="group-toggle" data-uuid="${uuid}" ${isActive ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
           </div>
@@ -230,11 +235,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   groupsContainer.addEventListener('click', async (e) => {
     const preview = e.target.closest('.pin-preview');
-    if (preview) return showModal(preview.dataset.group);
+    if (preview) return showModal(preview.dataset.uuid, preview.dataset.name);
 
     const nameSpan = e.target.closest('.group-name');
     if (nameSpan && !nameSpan.querySelector('input')) {
-      const oldName = nameSpan.dataset.group;
+      const uuid = nameSpan.dataset.uuid;
+      const groups = await loadPOIGroups();
+      const oldName = groups[uuid]?.name || '';
       const input = document.createElement('input');
       input.className = 'group-name-input';
       input.value = oldName;
@@ -245,15 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const done = async (save) => {
         const val = input.value.trim();
         if (save && val && val !== oldName) {
-          await renamePOIGroup(oldName, val);
-          if (preferences.groupStyles[oldName]) {
-            preferences.groupStyles[val] = preferences.groupStyles[oldName];
-            delete preferences.groupStyles[oldName];
-          }
-          if (activeGroups[oldName] !== undefined) {
-            activeGroups[val] = activeGroups[oldName];
-            delete activeGroups[oldName];
-          }
+          await renamePOIGroup(uuid, val);
           await saveData();
           await renderGroups();
         } else { nameSpan.textContent = oldName; }
@@ -263,10 +262,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const del = e.target.closest('.delete-btn');
-    if (del && confirm(`Delete "${del.dataset.group}"?`)) {
-      await deletePOIGroup(del.dataset.group);
-      delete preferences.groupStyles[del.dataset.group];
-      delete activeGroups[del.dataset.group];
+    if (del && confirm(`Delete "${del.dataset.name}"?`)) {
+      const uuid = del.dataset.uuid;
+      await deletePOIGroup(uuid);
+      delete preferences.groupStyles[uuid];
+      delete activeGroups[uuid];
       await saveData();
       await renderGroups();
     }
@@ -283,7 +283,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   groupsContainer.addEventListener('change', async (e) => {
     if (e.target.classList.contains('group-toggle')) {
-      activeGroups[e.target.dataset.group] = e.target.checked;
+      activeGroups[e.target.dataset.uuid] = e.target.checked;
       await saveData();
     }
   });
@@ -307,9 +307,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (importedCount > 0) {
               // Mark all imported groups as active
               const groups = await loadPOIGroups();
-              for (const groupName of Object.keys(groups)) {
-                if (activeGroups[groupName] === undefined) {
-                  activeGroups[groupName] = true;
+              for (const uuid of Object.keys(groups)) {
+                if (activeGroups[uuid] === undefined) {
+                  activeGroups[uuid] = true;
                 }
               }
               // Reload preferences to get the updated group styles
@@ -333,12 +333,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           const groupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
           const pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
           if (pois.length) {
-            await savePOIs(pois, groupName);
-            activeGroups[groupName] = true;
-            await saveData();
-            newGroupNameInput.value = '';
-            await renderGroups();
-            updateStatus('IMPORTED ' + pois.length);
+            const uuid = await savePOIs(pois, groupName);
+            if (uuid) {
+              activeGroups[uuid] = true;
+              await saveData();
+              newGroupNameInput.value = '';
+              await renderGroups();
+              updateStatus('IMPORTED ' + pois.length);
+            }
           }
         }
       } catch (err) {

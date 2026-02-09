@@ -224,11 +224,11 @@ class POIStateManager {
    * @private
    */
   _filterPOIsForRemovedGroups(removed) {
-    const bridgeFiltered = (this._bridgeLastPois || []).filter(p => !removed.includes(p.groupName));
+    const bridgeFiltered = (this._bridgeLastPois || []).filter(p => !removed.includes(p.groupUuid));
     
     if (window.manager?.markerData.length > 0) {
-      removed.forEach(group => window.manager?.removeMarkersForGroup(group));
-      window.manager.markerData = window.manager.markerData.filter(p => !removed.includes(p.groupName));
+      removed.forEach(uuid => window.manager?.removeMarkersForGroup(uuid));
+      window.manager.markerData = window.manager.markerData.filter(p => !removed.includes(p.groupUuid));
     }
     
     window.postMessage({ type: 'POI_DATA_UPDATE', pois: bridgeFiltered }, '*');
@@ -244,15 +244,19 @@ class POIStateManager {
     const all = [];
     const bridgePois = [];
     
-    selected.forEach(g => {
-      const groupPois = poiGroups[g] || [];
-      const style = this._preferences.groupStyles[g] || {};
+    selected.forEach(uuid => {
+      const group = poiGroups[uuid];
+      if (!group) return;
+      
+      const groupPois = group.pois || [];
+      const groupName = group.name;
+      const style = this._preferences.groupStyles[uuid] || {};
       const color = style.color || this._preferences.accentColor;
       const secondaryColor = style.secondaryColor || '#ffffff';
       const logoData = style.logoData;
       
       groupPois.forEach(p => {
-        all.push({ ...p, groupName: g });
+        all.push({ ...p, groupName, groupUuid: uuid });
         bridgePois.push({
           id: p.id,
           name: p.name,
@@ -261,7 +265,8 @@ class POIStateManager {
           color,
           secondaryColor,
           logoData,
-          groupName: g
+          groupName,
+          groupUuid: uuid
         });
       });
     });

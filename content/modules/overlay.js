@@ -153,8 +153,8 @@ class OverlayManager {
     this.updateDebug();
   }
 
-  removeMarkersForGroup(groupName) {
-    this.markerData = this.markerData.filter(p => p.groupName !== groupName);
+  removeMarkersForGroup(groupUuid) {
+    this.markerData = this.markerData.filter(p => p.groupUuid !== groupUuid);
     this.updateDebug();
   }
 
@@ -207,7 +207,7 @@ class OverlayManager {
     const poi = this.markerData.find(p => (p.id || p.name) === id);
     if (poi) {
       const pref = window.poiState.preferences;
-      const style = pref.groupStyles[poi.groupName] || {};
+      const style = pref.groupStyles[poi.groupUuid] || {};
       const color = style.color || pref.accentColor || '#ff0000';
 
       this.showPopup(poi, 0, 0, color);
@@ -225,7 +225,7 @@ class OverlayManager {
       if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
 
       const pref = window.poiState.preferences;
-      const style = pref.groupStyles[poi.groupName] || {};
+      const style = pref.groupStyles[poi.groupUuid] || {};
       const color = style.color || pref.accentColor || '#ff0000';
 
       this.hoverTimeout = setTimeout(() => {
@@ -276,7 +276,7 @@ class OverlayManager {
       <div style="font-size: 10px; opacity: 0.9; color: #cccccc !important;">GROUP: ${poi.groupName.toUpperCase()}</div>
       <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: #ffffff !important;">${poi.address || 'No address available'}</div>
       ${Object.entries(poi)
-        .filter(([k, v]) => !['name', 'groupName', 'address', 'latitude', 'longitude', 'id', 'color', 'secondaryColor', 'logoData'].includes(k) && v !== null && v !== undefined && String(v).trim() !== '')
+        .filter(([k, v]) => !['name', 'groupName', 'groupUuid', 'address', 'latitude', 'longitude', 'id', 'color', 'secondaryColor', 'logoData'].includes(k) && v !== null && v !== undefined && String(v).trim() !== '')
         .map(([k, v]) => `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px; color: #dddddd !important;">${k.toUpperCase()}: ${v}</div>`)
         .join('')}
     `;

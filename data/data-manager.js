@@ -1,8 +1,96 @@
 // Data management module for Map POI Injector
-// Simplified version (~9:22 PM ET)
+// UUID-based group management
 
 import { parseCSV } from './csv-parser.js';
 import { parseJSON } from './json-parser.js'; 
+
+/**
+ * Generates a UUID v4
+ */
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+/**
+ * Migrates old name-based storage to UUID-based storage
+ * @returns {Promise<boolean>} True if migration was performed
+ */
+export async function migrateToUUIDs(useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['poiGroups', 'preferences', 'activeGroups', '_uuidMigrated']);
+    
+    // Skip if already migrated
+    if (data._uuidMigrated) return false;
+    
+    const oldPoiGroups = data.poiGroups || {};
+    const oldPreferences = data.preferences || {};
+    const oldActiveGroups = data.activeGroups || {};
+    const oldGroupStyles = oldPreferences.groupStyles || {};
+    
+    // Check if this is old format (keys are group names, not UUIDs)
+    const keys = Object.keys(oldPoiGroups);
+    if (keys.length === 0) {
+      // Empty, just mark as migrated
+      await storage.set({ _uuidMigrated: true });
+      return false;
+    }
+    
+    // Check if already in UUID format (UUIDs contain hyphens and are 36 chars)
+    const isUUID = keys[0].length === 36 && keys[0].includes('-');
+    if (isUUID) {
+      await storage.set({ _uuidMigrated: true });
+      return false;
+    }
+    
+    // Perform migration
+    const newPoiGroups = {};
+    const newActiveGroups = {};
+    const newGroupStyles = {};
+    const nameToUuidMap = {};
+    
+    for (const [oldName, pois] of Object.entries(oldPoiGroups)) {
+      const uuid = generateUUID();
+      nameToUuidMap[oldName] = uuid;
+      
+      newPoiGroups[uuid] = {
+        name: oldName,
+        pois: Array.isArray(pois) ? pois : []
+      };
+      
+      // Migrate active status
+      newActiveGroups[uuid] = oldActiveGroups[oldName] !== false;
+      
+      // Migrate styles
+      if (oldGroupStyles[oldName]) {
+        newGroupStyles[uuid] = oldGroupStyles[oldName];
+      }
+    }
+    
+    // Update preferences with new groupStyles
+    const newPreferences = {
+      ...oldPreferences,
+      groupStyles: newGroupStyles
+    };
+    
+    await storage.set({
+      poiGroups: newPoiGroups,
+      preferences: newPreferences,
+      activeGroups: newActiveGroups,
+      _uuidMigrated: true
+    });
+    
+    console.log(`Migrated ${keys.length} groups to UUID format`);
+    return true;
+  } catch (error) {
+    console.error('Error during migration:', error);
+    return false;
+  }
+}
 
 /**
  * Imports data from various sources.
@@ -21,32 +109,51 @@ export function importData(dataString, format) {
 
 /**
  * Saves POI data to Chrome storage.
+ * @param {Array} pois - Array of POI objects
+ * @param {string} groupName - Display name for the group
+ * @param {boolean} useSyncStorage - Use sync storage instead of local
+ * @param {string} uuid - Optional UUID for the group (generates new one if not provided)
+ * @returns {Promise<string>} UUID of the created/updated group
  */
-export async function savePOIs(pois, groupName, useSyncStorage = false) {
-  if (!groupName) return;
+export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = null) {
+  if (!groupName) return null;
+  
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups']);
     const poiGroups = data.poiGroups || {};
     
-    if (!poiGroups[groupName]) {
-      poiGroups[groupName] = [];
+    const groupUuid = uuid || generateUUID();
+    
+    if (!poiGroups[groupUuid]) {
+      poiGroups[groupUuid] = {
+        name: groupName,
+        pois: []
+      };
     }
     
     // Simple append logic
-    poiGroups[groupName] = poiGroups[groupName].concat(pois);
+    poiGroups[groupUuid].pois = poiGroups[groupUuid].pois.concat(pois);
+    poiGroups[groupUuid].name = groupName; // Update name in case it changed
     
     await storage.set({ poiGroups });
-    console.log(`Saved ${pois.length} POIs to group: ${groupName}`);
+    console.log(`Saved ${pois.length} POIs to group: ${groupName} (${groupUuid})`);
+    return groupUuid;
   } catch (error) {
     console.error('Error saving POIs:', error);
+    return null;
   }
 }
 
 /**
  * Loads all POI groups.
+ * @returns {Promise<Object>} Object with UUIDs as keys, {name, pois} as values
  */
 export async function loadPOIGroups(useSyncStorage = false) {
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups']);
@@ -59,16 +166,20 @@ export async function loadPOIGroups(useSyncStorage = false) {
 
 /**
  * Renames a group.
+ * @param {string} uuid - UUID of the group
+ * @param {string} newName - New name for the group
  */
-export async function renamePOIGroup(oldName, newName, useSyncStorage = false) {
-  if (!oldName || !newName) return;
+export async function renamePOIGroup(uuid, newName, useSyncStorage = false) {
+  if (!uuid || !newName) return;
+  
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups']);
     const poiGroups = data.poiGroups || {};
-    if (poiGroups[oldName]) {
-      poiGroups[newName] = poiGroups[oldName];
-      delete poiGroups[oldName];
+    if (poiGroups[uuid]) {
+      poiGroups[uuid].name = newName;
       await storage.set({ poiGroups });
     }
   } catch (error) {
@@ -78,15 +189,19 @@ export async function renamePOIGroup(oldName, newName, useSyncStorage = false) {
 
 /**
  * Deletes a group.
+ * @param {string} uuid - UUID of the group to delete
  */
-export async function deletePOIGroup(groupName, useSyncStorage = false) {
-  if (!groupName) return;
+export async function deletePOIGroup(uuid, useSyncStorage = false) {
+  if (!uuid) return;
+  
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups']);
     const poiGroups = data.poiGroups || {};
-    if (poiGroups[groupName]) {
-      delete poiGroups[groupName];
+    if (poiGroups[uuid]) {
+      delete poiGroups[uuid];
       await storage.set({ poiGroups });
     }
   } catch (error) {
@@ -99,6 +214,8 @@ export async function deletePOIGroup(groupName, useSyncStorage = false) {
  * Returns an array of group objects ready to be saved as JSON.
  */
 export async function exportGroupsData(useSyncStorage = false) {
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups', 'preferences']);
@@ -108,8 +225,9 @@ export async function exportGroupsData(useSyncStorage = false) {
     
     const exportData = [];
     
-    for (const [groupName, pois] of Object.entries(poiGroups)) {
-      const style = groupStyles[groupName] || {};
+    for (const [uuid, groupData] of Object.entries(poiGroups)) {
+      const style = groupStyles[uuid] || {};
+      const pois = groupData.pois || [];
       
       // Convert POI data to CSV string
       if (pois.length > 0) {
@@ -129,7 +247,8 @@ export async function exportGroupsData(useSyncStorage = false) {
         });
         
         exportData.push({
-          name: groupName,
+          uuid: uuid,
+          name: groupData.name,
           icon: style.logoData || null,
           colors: {
             primary: style.color || '#d1ff00',
@@ -149,9 +268,11 @@ export async function exportGroupsData(useSyncStorage = false) {
 
 /**
  * Imports groups from exported format.
- * Handles the special export format with icon, colors, and CSV data.
+ * Handles the special export format with uuid, icon, colors, and CSV data.
  */
 export async function importGroupsData(exportedGroups, useSyncStorage = false) {
+  await migrateToUUIDs(useSyncStorage);
+  
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
     const data = await storage.get(['poiGroups', 'preferences']);
@@ -167,10 +288,19 @@ export async function importGroupsData(exportedGroups, useSyncStorage = false) {
       // Parse the CSV data
       const pois = parseCSV(group.data);
       if (pois.length > 0) {
-        poiGroups[group.name] = pois;
+        // Use provided UUID or generate new one
+        const uuid = group.uuid || generateUUID();
+        
+        // If UUID already exists, generate a new one to avoid collision
+        const finalUuid = poiGroups[uuid] ? generateUUID() : uuid;
+        
+        poiGroups[finalUuid] = {
+          name: group.name,
+          pois: pois
+        };
         
         // Import group styles
-        preferences.groupStyles[group.name] = {
+        preferences.groupStyles[finalUuid] = {
           color: group.colors?.primary || '#d1ff00',
           secondaryColor: group.colors?.secondary || '#ffffff',
           logoData: group.icon || null
