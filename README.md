@@ -53,25 +53,25 @@ A Chrome extension that injects Points of Interest (POI) markers onto real estat
 Experience Shullow across different real estate platforms:
 
 #### Zillow - Columbus Area with GoDaven POI Data
-![Zillow Markers - Columbus](docs/images/ZillowColumbusGoDaven.png)
+![Zillow Markers - Columbus](docs/images/examples/ZillowColumbusGoDaven.png)
 *Custom Shullow POI markers with custom pop-up information from your CSV files*
 
 #### Homes.com - Flushing with Shullow Overlay
-![Homes.com Overlay](docs/images/HomesFlushingShullowOverlayExample.png)
+![Homes.com Overlay](docs/images/examples/HomesFlushingShullowOverlayExample.png)
 *Shullow extension plugin menu. Control the plugin theme, add groups, rename them, customize them!*
 
 #### Realtor.com - US Young Israel Listing
-![Realtor.com Integration](docs/images/RealtorScreenshotUSYoungIsrael.png)
+![Realtor.com Integration](docs/images/examples/RealtorScreenshotUSYoungIsrael.png)
 *Custom icons for your Shullow POI groups so you can distinguish between them easily at any zoom level*
 
 #### Airbnb - Cancun with GoDaven Data
-![Airbnb Markers - Cancun](docs/images/AirbnbCancunGoDaven.png)
+![Airbnb Markers - Cancun](docs/images/examples/AirbnbCancunGoDaven.png)
 *Demonstrating generic map support extending beyond real estate sites, like if you need to find an AirBNB in Cancun within walking distance to a minyan on Shabbat*
 
 **To add more images:**
 1. Capture screenshots showing the extension in action
 2. Record GIFs of interactions (uploading data, toggling overlays, customizing colors)
-3. Add PNG/GIF files to `docs/images/`
+3. Add PNG/GIF files to `docs/images/examples/`
 4. Update this section with descriptive captions
 
 ## Architecture
@@ -101,8 +101,6 @@ CONTENT WORLD (Isolated)          MAIN WORLD (Page Context)
 
 ```
 ├── manifest.json              # Extension manifest (MV3)
-├── background/
-│   └── background.js          # Service worker
 ├── bridge/                     # MAIN world context (page access)
 │   ├── main.js                # Initialization and loop
 │   ├── entry.js               # Entry point
