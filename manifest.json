@@ -5,8 +5,7 @@
   "description": "Injects POI markers onto real estate map websites",
   "permissions": [
     "storage",
-    "activeTab",
-    "scripting"
+    "activeTab"
   ],
   "content_scripts": [
     {
