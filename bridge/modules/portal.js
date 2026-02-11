@@ -24,14 +24,12 @@ class PortalManager extends ManagerBase {
     
     // Priority levels for different data sources
     this.PRIORITIES = {
-      'instance-event': 100,      // Highest: Direct user interaction
+      'instance-event': 100,      // Highest: Direct user interaction (map drag/zoom)
       'redfin-redux-sub': 90,     // High: Real-time subscription
       'redfin-api': 85,           // High: API response is very fresh
       'instance-capture': 80,     // Medium: Extracted from active map instance
       'redfin-redux': 50,         // Low: Polled state (might be slightly stale)
-      'redfin-global': 40,        // Lower: Polled global variable (often stale)
-      'network-url': 20,          // Lowest: One-off network sniff
-      'network-body': 20
+      'redfin-global': 40        // Lower: Polled global variable (often stale)
     };
   }
 
