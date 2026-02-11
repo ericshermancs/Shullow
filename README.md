@@ -102,11 +102,6 @@ Experience Shullow across different real estate platforms:
 ![Airbnb Markers - Cancun](docs/images/examples/AirbnbCancunGoDaven.png)
 *Demonstrating generic map support extending beyond real estate sites, like if you need to find an AirBNB in Cancun within walking distance to a minyan on Shabbat*
 
-**To add more images:**
-1. Capture screenshots showing the extension in action
-2. Record GIFs of interactions (uploading data, toggling overlays, customizing colors)
-3. Add PNG/GIF files to `docs/images/examples/`
-4. Update this section with descriptive captions
 
 ## Architecture
 
