@@ -1,5 +1,5 @@
 {
-  "version": "0.2",
+  "version": "0.3",
   "devDependencies": {
     "crx": "^5.0.1",
     "esbuild": "^0.19.12",

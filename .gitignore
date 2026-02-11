@@ -29,3 +29,5 @@ session-ses*
 
 # Miscellaneous
 *.pem
+bridge/bridge-bundle*
+*.zip
