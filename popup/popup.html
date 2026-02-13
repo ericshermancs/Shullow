@@ -10,6 +10,9 @@
     <div class="logo-container">
       <img src="../docs/images/icons/logo.png" alt="Shullow Logo" style="height: 32px; width: 32px; vertical-align: middle; margin-right: 8px;" />
       <h1 style="display: inline-block; vertical-align: middle;">SHULLOW <span class="version">v0.3</span></h1>
+      <button id="night-mode-toggle" class="night-toggle-btn" title="Toggle Night Mode">
+        <span id="night-mode-icon">🌙</span>
+      </button>
     </div>
   </header>
 
@@ -31,12 +34,6 @@
           <input type="checkbox" id="debug-toggle">
           <span class="slider"></span>
         </label>
-      </div>
-      
-      <!-- Theme Customization -->
-      <div class="control-item theme-custom">
-        <span class="control-label">PLUGIN THEME</span>
-        <div class="theme-color-preview" id="theme-color-trigger" style="background: var(--accent-color);"></div>
       </div>
     </section>
 
@@ -68,10 +65,14 @@
     </section>
   </main>
 
-  <footer class="status-bar">
-    <div class="status-indicator"></div>
-    <span id="status-text">SYSTEM STANDBY</span>
-    <a href="https://ko-fi.com/ericshermancs" target="_blank" class="support-link" title="Support the project" style="color: #fff; font-size: 0.8rem;">Did I help you find a place? Consider buying me a coffee!</a>
+  <footer class="footer-bar">
+    <div class="footer-content">
+      <div class="status-section">
+        <div class="status-indicator"></div>
+        <span id="status-text">SYSTEM STANDBY</span>
+      </div>
+      <a href="https://ko-fi.com/ericshermancs" target="_blank" class="donation-link" title="Support the project">DONATE</a>
+    </div>
   </footer>
 
   <!-- Customization Modal -->

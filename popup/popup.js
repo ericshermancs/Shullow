@@ -12,6 +12,8 @@ const PIN_SVG = (color, secondary) => `
 document.addEventListener('DOMContentLoaded', async () => {
   const overlayToggle = document.getElementById('overlay-toggle');
   const debugToggle = document.getElementById('debug-toggle');
+  const nightModeToggle = document.getElementById('night-mode-toggle');
+  const nightModeIcon = document.getElementById('night-mode-icon');
   const groupsContainer = document.getElementById('groups-container');
   const groupCountEl = document.getElementById('group-count');
   const statusText = document.getElementById('status-text');
@@ -23,9 +25,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   let preferences = {
     overlayEnabled: true,
     debugEnabled: false,
+    nightMode: false,
     sitePreferences: {},
     groupStyles: {},
-    accentColor: '#d1ff00'
+    accentColor: '#4a9eff'
   };
   let activeGroups = {};
   let currentHost = '';
@@ -197,6 +200,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (state.preferences) preferences = { ...preferences, ...state.preferences };
   if (state.activeGroups) activeGroups = state.activeGroups;
   
+  // Migrate old yellow theme to new blue theme
+  if (preferences.accentColor === '#d1ff00') {
+    preferences.accentColor = '#4a9eff';
+  }
+  
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (tabs[0]?.url) {
       try {
@@ -208,10 +216,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   applyTheme(preferences.accentColor);
+    // Apply night mode if enabled
+    if (preferences.nightMode) {
+      document.body.classList.add('night-mode');
+      nightModeIcon.textContent = '☀️';
+    } else {
+      document.body.classList.remove('night-mode');
+      nightModeIcon.textContent = '🌙';
+    }
   await renderGroups();
   updateStatus('SYSTEM READY');
 
   // --- Listeners ---
+  nightModeToggle.addEventListener('click', () => {
+    preferences.nightMode = !preferences.nightMode;
+    if (preferences.nightMode) {
+      document.body.classList.add('night-mode');
+      nightModeIcon.textContent = '☀️';
+    } else {
+      document.body.classList.remove('night-mode');
+      nightModeIcon.textContent = '🌙';
+    }
+    saveData();
+  });
+
   overlayToggle.addEventListener('change', (e) => {
     if (!preferences.sitePreferences) preferences.sitePreferences = {};
     const enabled = e.target.checked;
@@ -230,8 +258,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     preferences.debugEnabled = e.target.checked;
     saveData();
   });
-
-  document.getElementById('theme-color-trigger').onclick = () => showModal('__theme__');
 
   groupsContainer.addEventListener('click', async (e) => {
     const preview = e.target.closest('.pin-preview');
