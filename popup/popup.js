@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const exportBtn = document.getElementById('export-btn');
 
   let preferences = {
-    overlayEnabled: true,
+    overlayEnabled: false,
     debugEnabled: false,
     nightMode: false,
     sitePreferences: {},
@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sitePref = preferences.sitePreferences?.[currentHost];
     if (sitePref && typeof sitePref.siteEnabled === 'boolean') return sitePref.siteEnabled;
     if (sitePref && typeof sitePref.overlayEnabled === 'boolean') return sitePref.overlayEnabled;
-    return true;
+    return false;
   };
   const updateSiteToggle = () => {
     overlayToggle.checked = getSiteEnabled();
