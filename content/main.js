@@ -86,4 +86,13 @@ function bootExtension(state) {
   } catch (e) {
     console.error('POI Main: Failed to inject bridge bundle', e);
   }
+
+  // Listen for messages from popup to reload overlay
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'reload-overlay') {
+      console.log('POI Main: Reloading overlay from popup message');
+      state.refresh();
+      sendResponse({ success: true });
+    }
+  });
 }

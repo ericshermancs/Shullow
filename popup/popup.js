@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const newGroupNameInput = document.getElementById('new-group-name');
   const csvUploadInput = document.getElementById('csv-upload');
   const exportBtn = document.getElementById('export-btn');
+  const disableAllBtn = document.getElementById('disable-all-btn');
+  const clearAllBtn = document.getElementById('clear-all-btn');
 
   let preferences = {
     overlayEnabled: false,
@@ -71,9 +73,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   let tempSecColor = '';
   let tempThemeColor = '';
 
-  const primaryWheel = new ColorWheel('primary-wheel-container', '#d1ff00', (hex) => { tempPriColor = hex; });
+  const primaryWheel = new ColorWheel('primary-wheel-container', '#4a9eff', (hex) => { tempPriColor = hex; });
   const secondaryWheel = new ColorWheel('secondary-wheel-container', '#ffffff', (hex) => { tempSecColor = hex; });
-  const themeWheel = new ColorWheel('theme-wheel-container', '#d1ff00', (hex) => { tempThemeColor = hex; });
+  const themeWheel = new ColorWheel('theme-wheel-container', '#4a9eff', (hex) => { tempThemeColor = hex; });
 
   const showModal = (groupUuid, groupName) => {
     currentEditingGroup = groupUuid;
@@ -88,8 +90,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       themeWheel.setColor(tempThemeColor);
     } else {
       modalTitle.textContent = `CUSTOMIZE: ${groupName.toUpperCase()}`;
-      const style = preferences.groupStyles[groupUuid] || { color: '#d1ff00', secondaryColor: '#ffffff', logoData: null };
-      tempPriColor = style.color || '#d1ff00';
+      const style = preferences.groupStyles[groupUuid] || { color: '#4a9eff', secondaryColor: '#ffffff', logoData: null };
+      tempPriColor = style.color || '#4a9eff';
       tempSecColor = style.secondaryColor || '#ffffff';
       currentLogoData = style.logoData;
       primaryWheel.setColor(tempPriColor);
@@ -174,7 +176,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         .sort((a, b) => a.group.name.localeCompare(b.group.name));
       
       sortedEntries.forEach(({ uuid, group }) => {
-        const style = preferences.groupStyles[uuid] || { color: '#d1ff00', secondaryColor: '#ffffff' };
+        const style = preferences.groupStyles[uuid] || { color: '#4a9eff', secondaryColor: '#ffffff' };
         const isActive = activeGroups[uuid] !== false;
         const icon = style.logoData ? `<img src="${style.logoData}" class="pin-icon">` : PIN_SVG(style.color, style.secondaryColor || '#ffffff');
         const item = document.createElement('div');
@@ -356,17 +358,65 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // Regular CSV/JSON import
         if (!isExportFormat) {
-          const groupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
-          const pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
-          if (pois.length) {
-            const uuid = await savePOIs(pois, groupName);
-            if (uuid) {
-              activeGroups[uuid] = true;
+          const defaultGroupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+          try {
+            const pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
+            if (pois.length) {
+              // Group POIs by groupName if specified, otherwise use default group
+              const groupedPois = {};
+              const ungroupedPois = [];
+              
+              for (const poi of pois) {
+                if (poi.groupName) {
+                  if (!groupedPois[poi.groupName]) {
+                    groupedPois[poi.groupName] = [];
+                  }
+                  groupedPois[poi.groupName].push(poi);
+                } else {
+                  ungroupedPois.push(poi);
+                }
+              }
+              
+              // Save ungrouped POIs to default group if any
+              if (ungroupedPois.length > 0) {
+                const uuid = await savePOIs(ungroupedPois, defaultGroupName);
+                if (uuid) {
+                  activeGroups[uuid] = true;
+                }
+              }
+              
+              // Save grouped POIs to their named groups
+              for (const [groupName, groupPois] of Object.entries(groupedPois)) {
+                const uuid = await savePOIs(groupPois, groupName);
+                if (uuid) {
+                  activeGroups[uuid] = true;
+                }
+              }
+              
+              // Reload all groups to ensure metadata is current
+              const loadedGroups = await loadPOIGroups();
+              for (const uuid of Object.keys(loadedGroups)) {
+                if (activeGroups[uuid] === undefined) {
+                  activeGroups[uuid] = true;
+                }
+              }
+              
+              // Reload preferences to get the updated group styles
+              const state = await StorageManager.loadState();
+              if (state && state.preferences) {
+                preferences = { ...preferences, ...state.preferences };
+              }
+              
               await saveData();
               newGroupNameInput.value = '';
               await renderGroups();
-              updateStatus('IMPORTED ' + pois.length);
+              const totalCount = Object.keys(groupedPois).length;
+              updateStatus(`IMPORTED ${pois.length} POIs IN ${totalCount > 0 ? totalCount + ' GROUPS' : defaultGroupName}`);
             }
+          } catch (importErr) {
+            console.error('Import validation error:', importErr);
+            alert(`Import Error:\n\n${importErr.message}`);
+            updateStatus('IMPORT FAILED');
           }
         }
       } catch (err) {
@@ -403,6 +453,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       console.error('Export error:', err);
       updateStatus('EXPORT FAILED');
+    }
+  };
+
+  // Disable all groups handler
+  disableAllBtn.onclick = async () => {
+    const groupCount = Object.keys(activeGroups).length;
+    if (groupCount === 0) {
+      updateStatus('NO GROUPS TO DISABLE');
+      return;
+    }
+    
+    if (confirm(`Disable all ${groupCount} group${groupCount !== 1 ? 's' : ''}?`)) {
+      for (const uuid of Object.keys(activeGroups)) {
+        activeGroups[uuid] = false;
+      }
+      await saveData();
+      // Notify all tabs to redraw
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
+        });
+      });
+      await renderGroups();
+      updateStatus(`DISABLED ${groupCount} GROUP${groupCount !== 1 ? 'S' : ''}`);
+    }
+  };
+
+  // Clear all groups handler
+  clearAllBtn.onclick = async () => {
+    const groupCount = Object.keys(activeGroups).length;
+    if (groupCount === 0) {
+      updateStatus('NO GROUPS TO CLEAR');
+      return;
+    }
+    
+    if (confirm(`Are you sure? This will DELETE all ${groupCount} group${groupCount !== 1 ? 's' : ''} and cannot be undone.`)) {
+      const groups = await loadPOIGroups();
+      for (const uuid of Object.keys(groups)) {
+        await deletePOIGroup(uuid);
+        delete preferences.groupStyles[uuid];
+        delete activeGroups[uuid];
+      }
+      await saveData();
+      // Notify all tabs to redraw
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
+        });
+      });
+      await renderGroups();
+      updateStatus(`CLEARED ALL GROUPS`);
     }
   };
 });
