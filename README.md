@@ -25,7 +25,7 @@ Chrome extension that injects custom Points of Interest (POI) markers onto real 
 
 1. Clone the repository and navigate to it:
    ```bash
-   git clone https://github.com/yourusername/Shullow.git
+   git clone https://github.com/ericshermancs/Shullow.git
    cd Shullow
    ```
 
