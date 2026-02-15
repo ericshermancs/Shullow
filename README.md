@@ -70,6 +70,25 @@ latitude,longitude,name,address
 
 Alternative field names are supported: `lat`/`lng`, `place_name`, etc.
 
+#### Multi-Group CSV Import
+
+Load multiple groups from a single CSV file by including a `shullow group` field (also accepts `shullow_group`, `shullow group name`, or `shullow_group_name`):
+
+```csv
+latitude,longitude,name,address,shullow group
+40.7128,-74.0060,Times Square,42nd Street NYC,Landmarks
+40.7580,-73.9855,Empire State,350 5th Avenue,Landmarks
+40.6892,-74.0445,Statue of Liberty,Liberty Island,Monuments
+40.7489,-73.9680,Grand Central,42nd Street,Transit
+```
+
+When a CSV contains the `shullow group` column, Shullow automatically:
+- Creates a separate group for each unique value in that column
+- Assigns each POI to its corresponding group
+- Applies a random color to each new group (matching the icon colors used for markers)
+
+In the example above, three groups would be created: "Landmarks", "Monuments", and "Transit".
+
 ### JSON Format
 
 Array of objects with the same fields as CSV:
@@ -79,6 +98,21 @@ Array of objects with the same fields as CSV:
   {"latitude": 40.7580, "longitude": -73.9855, "name": "Empire State"}
 ]
 ```
+
+#### Multi-Group JSON Import
+
+JSON files also support multi-group loading using a `groupName` field:
+
+```json
+[
+  {"latitude": 40.7128, "longitude": -74.0060, "name": "Times Square", "address": "42nd Street NYC", "groupName": "Landmarks"},
+  {"latitude": 40.7580, "longitude": -73.9855, "name": "Empire State", "address": "350 5th Avenue", "groupName": "Landmarks"},
+  {"latitude": 40.6892, "longitude": -74.0445, "name": "Statue of Liberty", "address": "Liberty Island", "groupName": "Monuments"},
+  {"latitude": 40.7489, "longitude": -73.9680, "name": "Grand Central", "address": "42nd Street", "groupName": "Transit"}
+]
+```
+
+This produces the same result as the multi-group CSV example: three automatically-created groups with POIs distributed accordingly.
 
 ## Gallery
 
