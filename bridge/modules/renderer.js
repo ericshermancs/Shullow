@@ -392,14 +392,14 @@ window.poiRenderer = {
        el.onmouseenter = () => {
           const hoverZIndex = config.styles.markerHoverZIndex || 1000000;
           el.style.zIndex = hoverZIndex.toString();
-          const message = { type: 'POI_MARKER_HOVER', id: poi.id, lat: poi.latitude, lng: poi.longitude };
+          const message = { type: 'POI_MARKER_HOVER', id, lat: poi.latitude, lng: poi.longitude };
           console.log('[Renderer] Posting hover event (Mapbox):', message);
           window.postMessage(message, '*');
        };
        
        el.onmouseleave = () => {
           el.style.zIndex = baseZIndex.toString();
-          window.postMessage({ type: 'POI_MARKER_LEAVE', id: poi.id }, '*');
+          window.postMessage({ type: 'POI_MARKER_LEAVE', id }, '*');
        };
 
        const marker = new window.mapboxgl.Marker({ element: el })
