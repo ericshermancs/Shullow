@@ -146,22 +146,34 @@ export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = n
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups', 'preferences']);
-    const poiGroups = data.poiGroups || {};
-    const preferences = data.preferences || {};
+    const data = await storage.get(['profiles', 'activeProfile', 'poiGroups', 'preferences']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+    
+    if (!activeProfile) {
+      console.error('No active profile found');
+      return null;
+    }
+    
+    // Initialize profile groups storage if needed
+    if (!activeProfile.groups) {
+      activeProfile.groups = {};
+    }
     
     const groupUuid = uuid || generateUUID();
-    const isNewGroup = !poiGroups[groupUuid];
+    const isNewGroup = !activeProfile.groups[groupUuid];
     
     if (isNewGroup) {
-      poiGroups[groupUuid] = {
+      activeProfile.groups[groupUuid] = {
+        uuid: groupUuid,
         name: groupName,
         pois: []
       };
       
-      // Assign random color to new group
-      if (!preferences.groupStyles) preferences.groupStyles = {};
-      preferences.groupStyles[groupUuid] = {
+      // Assign random color to new group and store in profile's groupStyles
+      if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+      activeProfile.groupStyles[groupUuid] = {
         color: generateRandomColor(),
         secondaryColor: '#ffffff',
         logoData: null
@@ -169,11 +181,14 @@ export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = n
     }
     
     // Simple append logic
-    poiGroups[groupUuid].pois = poiGroups[groupUuid].pois.concat(pois);
-    poiGroups[groupUuid].name = groupName; // Update name in case it changed
+    activeProfile.groups[groupUuid].pois = activeProfile.groups[groupUuid].pois.concat(pois);
+    activeProfile.groups[groupUuid].name = groupName; // Update name in case it changed
     
-    await storage.set({ poiGroups, preferences });
-    console.log(`Saved ${pois.length} POIs to group: ${groupName} (${groupUuid})`);
+    // Update profiles in storage
+    profiles[activeProfileUuid] = activeProfile;
+    await storage.set({ profiles });
+    
+    console.log(`Saved ${pois.length} POIs to group: ${groupName} (${groupUuid}) in profile: ${activeProfile.name}`);
     return groupUuid;
   } catch (error) {
     console.error('Error saving POIs:', error);
@@ -182,15 +197,26 @@ export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = n
 }
 
 /**
- * Loads all POI groups.
- * @returns {Promise<Object>} Object with UUIDs as keys, {name, pois} as values
+ * Loads all POI groups for the active profile.
+ * Groups are now stored per-profile, not globally.
+ * @returns {Promise<Object>} Object with UUIDs as keys, {name, pois, uuid} as values
  */
 export async function loadPOIGroups(useSyncStorage = false) {
   await migrateToUUIDs(useSyncStorage);
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups']);
+    const data = await storage.get(['profiles', 'activeProfile', 'poiGroups']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+    
+    // Return groups from active profile
+    if (activeProfile && activeProfile.groups) {
+      return activeProfile.groups;
+    }
+    
+    // Fallback to legacy global poiGroups for backwards compatibility
     return data.poiGroups || {};
   } catch (error) {
     console.error('Error loading POIs:', error);
@@ -199,7 +225,7 @@ export async function loadPOIGroups(useSyncStorage = false) {
 }
 
 /**
- * Renames a group.
+ * Renames a group in the active profile.
  * @param {string} uuid - UUID of the group
  * @param {string} newName - New name for the group
  */
@@ -210,7 +236,20 @@ export async function renamePOIGroup(uuid, newName, useSyncStorage = false) {
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups']);
+    const data = await storage.get(['profiles', 'activeProfile', 'poiGroups']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+    
+    // Try to rename in active profile first
+    if (activeProfile && activeProfile.groups && activeProfile.groups[uuid]) {
+      activeProfile.groups[uuid].name = newName;
+      profiles[activeProfileUuid] = activeProfile;
+      await storage.set({ profiles });
+      return;
+    }
+    
+    // Fallback to legacy global poiGroups for backwards compatibility
     const poiGroups = data.poiGroups || {};
     if (poiGroups[uuid]) {
       poiGroups[uuid].name = newName;
@@ -222,7 +261,9 @@ export async function renamePOIGroup(uuid, newName, useSyncStorage = false) {
 }
 
 /**
- * Deletes a group.
+ * Deletes a group from the active profile.
+ * Each profile keeps its own copy of groups, so deleting from one profile
+ * doesn't affect the same group in another profile.
  * @param {string} uuid - UUID of the group to delete
  */
 export async function deletePOIGroup(uuid, useSyncStorage = false) {
@@ -232,7 +273,34 @@ export async function deletePOIGroup(uuid, useSyncStorage = false) {
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups']);
+    const data = await storage.get(['profiles', 'activeProfile', 'poiGroups']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+    
+    // Delete from active profile
+    if (activeProfile && activeProfile.groups && activeProfile.groups[uuid]) {
+      delete activeProfile.groups[uuid];
+      
+      // Also remove from profile's groupStyles if present
+      if (activeProfile.groupStyles && uuid in activeProfile.groupStyles) {
+        delete activeProfile.groupStyles[uuid];
+      }
+      
+      profiles[activeProfileUuid] = activeProfile;
+      await storage.set({ profiles });
+      
+      // Remove from profile's groupUuids array if it exists
+      const groupUuidsIndex = activeProfile.groupUuids?.indexOf(uuid);
+      if (groupUuidsIndex !== undefined && groupUuidsIndex >= 0) {
+        activeProfile.groupUuids.splice(groupUuidsIndex, 1);
+        profiles[activeProfileUuid] = activeProfile;
+        await storage.set({ profiles });
+      }
+      return;
+    }
+    
+    // Fallback to legacy global poiGroups for backwards compatibility
     const poiGroups = data.poiGroups || {};
     if (poiGroups[uuid]) {
       delete poiGroups[uuid];
@@ -244,7 +312,8 @@ export async function deletePOIGroup(uuid, useSyncStorage = false) {
 }
 
 /**
- * Exports all groups with their data, icons, and color preferences.
+ * Exports groups for the active profile with their data, icons, and color preferences.
+ * Each profile's groups are independent, so exporting one profile won't include groups from other profiles.
  * Returns an array of group objects ready to be saved as JSON.
  */
 export async function exportGroupsData(useSyncStorage = false) {
@@ -252,14 +321,19 @@ export async function exportGroupsData(useSyncStorage = false) {
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups', 'preferences']);
-    const poiGroups = data.poiGroups || {};
-    const preferences = data.preferences || {};
-    const groupStyles = preferences.groupStyles || {};
+    const data = await storage.get(['profiles', 'activeProfile']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
     
+    if (!activeProfile || !activeProfile.groups) {
+      return [];
+    }
+    
+    const groupStyles = activeProfile.groupStyles || {};
     const exportData = [];
     
-    for (const [uuid, groupData] of Object.entries(poiGroups)) {
+    for (const [uuid, groupData] of Object.entries(activeProfile.groups)) {
       const style = groupStyles[uuid] || {};
       const pois = groupData.pois || [];
       
@@ -301,54 +375,427 @@ export async function exportGroupsData(useSyncStorage = false) {
 }
 
 /**
- * Imports groups from exported format.
- * Handles the special export format with uuid, icon, colors, and CSV data.
+ * Imports groups from exported format into the active profile.
+ * Always generates new UUIDs for imported groups to avoid collisions.
+ * Each profile keeps its own copy of imported groups.
+ * Handles the special export format with icon, colors, and CSV data.
+ * Saves groups incrementally to avoid quota issues.
+ * @returns {Promise<Array>} Array of imported group UUIDs
  */
-export async function importGroupsData(exportedGroups, useSyncStorage = false) {
+export async function* importGroupsData(exportedGroups, useSyncStorage = false) {
   await migrateToUUIDs(useSyncStorage);
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups', 'preferences']);
-    const poiGroups = data.poiGroups || {};
-    const preferences = data.preferences || {};
-    if (!preferences.groupStyles) preferences.groupStyles = {};
+    const data = await storage.get(['profiles', 'activeProfile']);
+    const profiles = data.profiles || {};
+    const activeProfileUuid = data.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+    
+    if (!activeProfile) {
+      console.error('No active profile found');
+      return;
+    }
+    
+    // Initialize profile groups storage if needed
+    if (!activeProfile.groups) {
+      activeProfile.groups = {};
+    }
+    if (!activeProfile.groupStyles) {
+      activeProfile.groupStyles = {};
+    }
     
     let importedCount = 0;
     
     for (const group of exportedGroups) {
       if (!group.name || !group.data) continue;
       
-      // Parse the CSV data
-      const pois = parseCSV(group.data);
-      if (pois.length > 0) {
-        // Use provided UUID or generate new one
-        const uuid = group.uuid || generateUUID();
-        
-        // If UUID already exists, generate a new one to avoid collision
-        const finalUuid = poiGroups[uuid] ? generateUUID() : uuid;
-        
-        poiGroups[finalUuid] = {
-          name: group.name,
-          pois: pois
-        };
-        
-        // Import group styles
-        preferences.groupStyles[finalUuid] = {
-          color: group.colors?.primary || '#d1ff00',
-          secondaryColor: group.colors?.secondary || '#ffffff',
-          logoData: group.icon || null
-        };
-        
-        importedCount++;
+      try {
+        // Parse the CSV data
+        const pois = parseCSV(group.data);
+        if (pois.length > 0) {
+          // Always generate a new UUID for imported groups (don't reuse UUIDs from export)
+          const newUuid = generateUUID();
+          
+          activeProfile.groups[newUuid] = {
+            uuid: newUuid,
+            name: group.name,
+            pois: pois
+          };
+          
+          // Import group styles (skip logo data to save space if it's very large)
+          activeProfile.groupStyles[newUuid] = {
+            color: group.colors?.primary || '#d1ff00',
+            secondaryColor: group.colors?.secondary || '#ffffff',
+            logoData: group.icon && group.icon.length < 50000 ? group.icon : null  // Skip if logo > 50KB
+          };
+          
+          importedCount++;
+          
+          // Save to storage before yielding so content script can read the data
+          profiles[activeProfileUuid] = activeProfile;
+          await storage.set({ profiles });
+          
+          // Yield the imported group info - caller handles all updates
+          yield {
+            groupUuid: newUuid,
+            groupName: group.name,
+            importCount: importedCount
+          };
+        }
+      } catch (groupError) {
+        console.error(`Failed to import group "${group.name}":`, groupError);
+        // Continue with next group
       }
     }
     
-    await storage.set({ poiGroups, preferences });
-    console.log(`Imported ${importedCount} groups with styles`);
-    return importedCount;
+    console.log(`Imported ${importedCount} groups into profile: ${activeProfile.name}`);
   } catch (error) {
     console.error('Error importing groups:', error);
-    return 0;
+  }
+}
+
+// ============================================
+// PROFILE MANAGEMENT
+// ============================================
+
+/**
+ * Initializes profiles if they don't exist.
+ * Migrates existing groups from legacy global storage to "Default" profile's per-profile storage.
+ */
+export async function initializeProfiles(useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['profiles', 'activeProfile', 'poiGroups', 'preferences', '_profilesInitialized']);
+    
+    if (data._profilesInitialized) return true;
+    
+    const poiGroups = data.poiGroups || {};
+    const preferences = data.preferences || {};
+    const groupUuids = Object.keys(poiGroups);
+    const groupStyles = preferences.groupStyles || {};
+    
+    let profiles = {};
+    
+    // If there are existing groups, migrate them to "Default" profile
+    if (groupUuids.length > 0) {
+      const defaultProfileUuid = generateUUID();
+      const groups = {};
+      
+      // Migrate groups to per-profile storage format
+      for (const uuid of groupUuids) {
+        groups[uuid] = {
+          uuid: uuid,
+          ...poiGroups[uuid]
+        };
+      }
+      
+      profiles[defaultProfileUuid] = {
+        uuid: defaultProfileUuid,
+        name: 'Default',
+        createdDate: Date.now(),
+        groups: groups, // Now stored per-profile
+        groupStyles: groupStyles
+      };
+      
+      await storage.set({
+        profiles,
+        activeProfile: defaultProfileUuid,
+        _profilesInitialized: true
+      });
+      
+      console.log(`Initialized profiles, migrated ${groupUuids.length} groups to Default profile's per-profile storage`);
+      return true;
+    } else {
+      // No groups exist, create empty Default profile
+      const defaultProfileUuid = generateUUID();
+      profiles[defaultProfileUuid] = {
+        uuid: defaultProfileUuid,
+        name: 'Default',
+        createdDate: Date.now(),
+        groups: {}, // Per-profile group storage
+        groupStyles: {}
+      };
+      
+      await storage.set({
+        profiles,
+        activeProfile: defaultProfileUuid,
+        _profilesInitialized: true
+      });
+      
+      return true;
+    }
+  } catch (error) {
+    console.error('Error initializing profiles:', error);
+    return false;
+  }
+}
+
+/**
+ * Gets all profiles
+ * @returns {Promise<Object>} Object with UUIDs as keys, profile objects as values
+ */
+export async function getProfiles(useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles']);
+    return data.profiles || {};
+  } catch (error) {
+    console.error('Error getting profiles:', error);
+    return {};
+  }
+}
+
+/**
+ * Gets the currently active profile
+ * @returns {Promise<Object|null>} The active profile object or null
+ */
+export async function getActiveProfile(useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles', 'activeProfile']);
+    const activeProfileUuid = data.activeProfile;
+    const profiles = data.profiles || {};
+    return profiles[activeProfileUuid] || null;
+  } catch (error) {
+    console.error('Error getting active profile:', error);
+    return null;
+  }
+}
+
+/**
+ * Creates a new profile
+ * @param {string} name - Profile name
+ * @returns {Promise<string>} UUID of the created profile
+ */
+export async function createProfile(name, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles']);
+    const profiles = data.profiles || {};
+    
+    const profileUuid = generateUUID();
+    profiles[profileUuid] = {
+      uuid: profileUuid,
+      name: name,
+      createdDate: Date.now(),
+      groupUuids: [],
+      groupStyles: {}
+    };
+    
+    await storage.set({ profiles });
+    console.log(`Created profile: ${name} (${profileUuid})`);
+    return profileUuid;
+  } catch (error) {
+    console.error('Error creating profile:', error);
+    return null;
+  }
+}
+
+/**
+ * Switches to a different profile
+ * Stores the active groups state for current profile before switching
+ * @param {string} profileUuid - UUID of the profile to switch to
+ * @param {Object} currentActiveGroups - Current active groups state before switch
+ * @returns {Promise<Object>} The new active profile
+ */
+export async function switchProfile(profileUuid, currentActiveGroups = {}, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles', 'activeProfile']);
+    const profiles = data.profiles || {};
+    const oldActiveProfile = data.activeProfile;
+    
+    if (!profiles[profileUuid]) {
+      console.error(`Profile ${profileUuid} not found`);
+      return null;
+    }
+    
+    // Save active groups state for the old profile before switching
+    if (oldActiveProfile && profiles[oldActiveProfile]) {
+      profiles[oldActiveProfile].activeGroups = currentActiveGroups;
+    }
+    
+    const newProfile = profiles[profileUuid];
+    
+    await storage.set({
+      profiles,
+      activeProfile: profileUuid
+    });
+    
+    console.log(`Switched to profile: ${newProfile.name}`);
+    return newProfile;
+  } catch (error) {
+    console.error('Error switching profile:', error);
+    return null;
+  }
+}
+
+/**
+ * Adds a group to a profile's groupUuids list.
+ * DEPRECATED: Groups are now stored per-profile, so this is only needed for backwards compatibility
+ * with code that still uses the groupUuids array.
+ * @param {string} groupUuid - UUID of the group
+ * @param {string} profileUuid - UUID of the profile
+ */
+export async function addGroupToProfile(groupUuid, profileUuid, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles']);
+    const profiles = data.profiles || {};
+    
+    if (profiles[profileUuid]) {
+      // Initialize groupUuids if it doesn't exist (for backwards compatibility)
+      if (!profiles[profileUuid].groupUuids) {
+        profiles[profileUuid].groupUuids = [];
+      }
+      if (!profiles[profileUuid].groupUuids.includes(groupUuid)) {
+        profiles[profileUuid].groupUuids.push(groupUuid);
+        await storage.set({ profiles });
+      }
+    }
+  } catch (error) {
+    console.error('Error adding group to profile:', error);
+  }
+}
+
+/**
+ * Removes a group from a profile's groupUuids list.
+ * DEPRECATED: Groups are now stored per-profile, so this mainly removes from the groupUuids array.
+ * The group data is automatically deleted when savePOIs is called without it.
+ * @param {string} groupUuid - UUID of the group
+ * @param {string} profileUuid - UUID of the profile
+ */
+export async function removeGroupFromProfile(groupUuid, profileUuid, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles']);
+    const profiles = data.profiles || {};
+    
+    if (profiles[profileUuid]) {
+      // Remove from groupUuids array (for backwards compatibility)
+      if (profiles[profileUuid].groupUuids) {
+        profiles[profileUuid].groupUuids = profiles[profileUuid].groupUuids.filter(u => u !== groupUuid);
+      }
+      
+      // Remove from profile's groupStyles if present
+      if (profiles[profileUuid].groupStyles && groupUuid in profiles[profileUuid].groupStyles) {
+        delete profiles[profileUuid].groupStyles[groupUuid];
+      }
+      
+      await storage.set({ profiles });
+    }
+  } catch (error) {
+    console.error('Error removing group from profile:', error);
+  }
+}
+
+/**
+ * Deletes a profile
+ * Cannot delete the profile if it's the active one
+ * @param {string} profileUuid - UUID of the profile to delete
+ * @returns {Promise<boolean>} True if deleted successfully
+ */
+export async function deleteProfile(profileUuid, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles', 'activeProfile']);
+    const profiles = data.profiles || {};
+    
+    if (data.activeProfile === profileUuid) {
+      console.error('Cannot delete the active profile');
+      return false;
+    }
+    
+    if (profiles[profileUuid]) {
+      delete profiles[profileUuid];
+      await storage.set({ profiles });
+      console.log(`Deleted profile: ${profileUuid}`);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error deleting profile:', error);
+    return false;
+  }
+}
+
+/**
+ * Renames a profile
+ * @param {string} profileUuid - UUID of the profile
+ * @param {string} newName - New name for the profile
+ */
+export async function renameProfile(profileUuid, newName, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  await initializeProfiles(useSyncStorage);
+  try {
+    const data = await storage.get(['profiles']);
+    const profiles = data.profiles || {};
+    
+    if (profiles[profileUuid]) {
+      profiles[profileUuid].name = newName;
+      await storage.set({ profiles });
+      console.log(`Renamed profile to: ${newName}`);
+    }
+  } catch (error) {
+    console.error('Error renaming profile:', error);
+  }
+}
+/**
+ * Deletes all groups from a profile
+ * @param {string} profileUuid - Profile UUID
+ * @param {boolean} useSyncStorage - Whether to use chrome.storage.sync
+ * @returns {Promise<number>} Number of groups deleted
+ */
+export async function* deleteAllGroupsFromProfile(profileUuid, useSyncStorage = false) {
+  const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
+  try {
+    const data = await storage.get(['profiles']);
+    const profiles = data.profiles || {};
+    const profile = profiles[profileUuid];
+
+    if (!profile) {
+      console.error('[DELETE] Profile not found:', profileUuid);
+      return;
+    }
+
+    const groupUuids = Object.keys(profile.groups || {});
+    console.log(`[DELETE] Starting deletion of ${groupUuids.length} groups from profile: ${profile.name}`);
+    let deletedCount = 0;
+    
+    for (const uuid of groupUuids) {
+      const groupName = profile.groups[uuid]?.name || 'Unknown';
+      console.log(`[DELETE] Deleting group: ${groupName} (${uuid})`);
+      
+      // Remove this group
+      delete profile.groups[uuid];
+      delete profile.groupStyles[uuid];
+      delete profile.activeGroups[uuid];
+      
+      deletedCount++;
+      
+      // Save to storage after each deletion
+      profiles[profileUuid] = profile;
+      await storage.set({ profiles });
+      console.log(`[DELETE] Saved after deleting ${groupName}, now ${Object.keys(profile.groups || {}).length} groups remain`);
+      
+      // Yield deleted group info - caller handles UI updates
+      yield {
+        groupUuid: uuid,
+        groupName,
+        deletedCount
+      };
+    }
+    
+    console.log(`[DELETE] Completed deletion of ${deletedCount} groups from profile: ${profile.name}`);
+  } catch (error) {
+    console.error('[DELETE] Error deleting all groups:', error);
   }
 }

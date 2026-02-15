@@ -1,6 +1,7 @@
-import { loadPOIGroups, savePOIs, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData } from '../data/data-manager.js';
+import { loadPOIGroups, savePOIs, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData, deleteAllGroupsFromProfile } from '../data/data-manager.js';
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
+import { profileManager } from './modules/profile-manager.js';
 
 const PIN_SVG = (color, secondary) => `
 <svg class="pin-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -43,6 +44,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     previews.forEach(p => p.style.background = color);
   };
   const saveData = async () => {
+    // Save both to top level (for backwards compat) and to active profile
+    const activeProfile = profileManager.getActive();
+    if (activeProfile) {
+      activeProfile.activeGroups = { ...activeGroups };
+      const allProfiles = await chrome.storage.local.get(['profiles']);
+      const profiles = allProfiles.profiles || {};
+      profiles[activeProfile.uuid] = activeProfile;
+      await chrome.storage.local.set({ profiles });
+    }
+    
     await StorageManager.saveState(preferences, activeGroups);
     StorageManager.notifyContentScript(activeGroups, preferences);
   };
@@ -90,7 +101,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       themeWheel.setColor(tempThemeColor);
     } else {
       modalTitle.textContent = `CUSTOMIZE: ${groupName.toUpperCase()}`;
-      const style = preferences.groupStyles[groupUuid] || { color: '#4a9eff', secondaryColor: '#ffffff', logoData: null };
+      // Get style from active profile's groupStyles, fallback to global preferences
+      const activeProfile = profileManager.getActive();
+      const profileGroupStyles = activeProfile?.groupStyles || {};
+      const style = profileGroupStyles[groupUuid] || preferences.groupStyles[groupUuid] || { color: '#4a9eff', secondaryColor: '#ffffff', logoData: null };
       tempPriColor = style.color || '#4a9eff';
       tempSecColor = style.secondaryColor || '#ffffff';
       currentLogoData = style.logoData;
@@ -107,6 +121,173 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentLogoData = null;
     logoInput.value = '';
   };
+
+  // --- Profile Modal Logic ---
+  const profileModal = document.getElementById('profile-modal');
+  const profileMenuBtn = document.getElementById('profile-menu-btn');
+  const profileModalClose = document.getElementById('profile-modal-close');
+  const profilesList = document.getElementById('profiles-list');
+  const newProfileNameInput = document.getElementById('new-profile-name');
+  const createProfileBtn = document.getElementById('create-profile-btn');
+
+  const showProfileModal = async () => {
+    await renderProfiles();
+    profileModal.style.display = 'flex';
+  };
+
+  const hideProfileModal = () => {
+    profileModal.style.display = 'none';
+  };
+
+  const renderProfiles = async () => {
+    try {
+      const allProfiles = profileManager.getAll();
+      const activeUuid = profileManager.getActiveUuid();
+      
+      // Also read fresh storage data to get actual group counts
+      const storageData = await chrome.storage.local.get(['profiles']);
+      const storageProfiles = storageData.profiles || {};
+
+      profilesList.innerHTML = '';
+
+      const sortedProfiles = Object.values(allProfiles)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      sortedProfiles.forEach(profile => {
+        const isActive = profile.uuid === activeUuid;
+        // Get actual group count from storage, not from cached groupUuids
+        const storageProfile = storageProfiles[profile.uuid];
+        const groupCount = Object.keys(storageProfile?.groups || {}).length;
+        const item = document.createElement('div');
+        item.className = `profile-item ${isActive ? 'active' : ''}`;
+        item.innerHTML = `
+          <span class="profile-item-name">${profile.name}</span>
+          <span class="profile-item-count">${groupCount} group${groupCount !== 1 ? 's' : ''}</span>
+          ${!isActive ? `<button class="profile-delete-btn" data-uuid="${profile.uuid}" title="Delete profile">&times;</button>` : ''}
+        `;
+
+        // Click to switch profile
+        item.onclick = async (e) => {
+          if (e.target.closest('.profile-delete-btn')) {
+            // Handle delete
+            const uuid = e.target.dataset.uuid;
+            const profileToDelete = allProfiles[uuid];
+            if (confirm(`Delete profile "${profileToDelete.name}"?`)) {
+              await profileManager.delete(uuid);
+              await renderProfiles();
+              updateStatus(`DELETED PROFILE: ${profileToDelete.name}`);
+            }
+          } else if (!isActive) {
+            // Handle switch
+            await switchProfiles(profile.uuid);
+            hideProfileModal();
+          }
+        };
+
+        profilesList.appendChild(item);
+      });
+    } catch (e) {
+      console.error('Render profiles error', e);
+    }
+  };
+
+  const switchProfiles = async (newProfileUuid) => {
+    try {
+      const newProfile = profileManager.getById(newProfileUuid);
+
+      if (!newProfile) {
+        console.error('Profile not found');
+        return;
+      }
+
+      // Save the current profile's active groups state before switching
+      const oldProfile = profileManager.getActive();
+      if (oldProfile) {
+        oldProfile.activeGroups = { ...activeGroups };
+        // Save the old profile with updated active groups
+        const allProfiles = await chrome.storage.local.get(['profiles']);
+        const profiles = allProfiles.profiles || {};
+        profiles[oldProfile.uuid] = oldProfile;
+        await chrome.storage.local.set({ profiles });
+      }
+
+      // Switch to new profile
+      const result = await profileManager.switch(newProfileUuid, activeGroups);
+
+      if (result) {
+        // Restore active groups state for this profile
+        // Only include groups that actually belong to this profile
+        const profileGroupUuids = new Set(result.groups ? Object.keys(result.groups) : []);
+        activeGroups = {};
+        
+        if (result.activeGroups) {
+          // Restore saved state, but only for groups that exist in this profile
+          for (const [uuid, isActive] of Object.entries(result.activeGroups)) {
+            if (profileGroupUuids.has(uuid)) {
+              activeGroups[uuid] = isActive;
+            }
+          }
+        }
+        
+        // For any groups in the profile that don't have a saved state, default to active
+        for (const groupUuid of profileGroupUuids) {
+          if (!(groupUuid in activeGroups)) {
+            activeGroups[groupUuid] = true;
+          }
+        }
+
+        // Restore group styles for this profile
+        if (result.groupStyles) {
+          preferences.groupStyles = { ...result.groupStyles };
+        }
+
+        await saveData();
+
+        // Trigger redraw on all tabs
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
+          });
+        });
+
+        await renderGroups();
+        updateStatus(`SWITCHED TO: ${result.name.toUpperCase()}`);
+      }
+    } catch (error) {
+      console.error('Error switching profiles:', error);
+      updateStatus('PROFILE SWITCH FAILED');
+    }
+  };
+
+  profileMenuBtn.onclick = showProfileModal;
+  profileModalClose.onclick = hideProfileModal;
+
+  createProfileBtn.onclick = async () => {
+    const name = newProfileNameInput.value.trim();
+    if (!name) {
+      updateStatus('ENTER PROFILE NAME');
+      return;
+    }
+
+    try {
+      const newProfileUuid = await profileManager.create(name);
+      if (newProfileUuid) {
+        newProfileNameInput.value = '';
+        await renderProfiles();
+        updateStatus(`CREATED: ${name.toUpperCase()}`);
+      }
+    } catch (error) {
+      console.error('Error creating profile:', error);
+      updateStatus('PROFILE CREATION FAILED');
+    }
+  };
+
+  // Close profile modal when clicking outside
+  profileModal.addEventListener('click', (e) => {
+    if (e.target === profileModal) {
+      hideProfileModal();
+    }
+  });
 
   const updateLogoPreview = (data) => {
     if (data) {
@@ -149,8 +330,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       applyTheme(tempThemeColor);
       await saveData();
     } else if (currentEditingGroup) {
-      if (!preferences.groupStyles) preferences.groupStyles = {};
-      preferences.groupStyles[currentEditingGroup] = { color: tempPriColor, secondaryColor: tempSecColor, logoData: currentLogoData };
+      // Save group styles to the active profile, not globally
+      const activeProfile = profileManager.getActive();
+      if (activeProfile) {
+        if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+        activeProfile.groupStyles[currentEditingGroup] = { 
+          color: tempPriColor, 
+          secondaryColor: tempSecColor, 
+          logoData: currentLogoData 
+        };
+        
+        // Also keep in preferences for backward compatibility
+        if (!preferences.groupStyles) preferences.groupStyles = {};
+        preferences.groupStyles[currentEditingGroup] = { 
+          color: tempPriColor, 
+          secondaryColor: tempSecColor, 
+          logoData: currentLogoData 
+        };
+        
+        // Save the profile with updated groupStyles
+        const allProfiles = await chrome.storage.local.get(['profiles']);
+        const profiles = allProfiles.profiles || {};
+        profiles[activeProfile.uuid] = activeProfile;
+        await chrome.storage.local.set({ profiles });
+      }
+      
       await saveData();
       console.log(`[POPUP] saveConfig: group=${currentEditingGroup}, newColor=${tempPriColor}`);
       StorageManager.notifyContentScript(activeGroups, preferences, currentEditingGroup);
@@ -166,17 +370,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   const renderGroups = async () => {
     try {
       const groups = await loadPOIGroups();
-      const uuids = Object.keys(groups);
-      groupCountEl.textContent = uuids.length;
-      if (uuids.length === 0) { groupsContainer.innerHTML = '<div class="empty-state">NO GROUPS FOUND</div>'; return; }
+      
+      // Get only groups that belong to the current profile
+      // This ensures groups are not shared across profiles
+      const profileGroupUuids = profileManager.getActiveGroupUuids();
+      const profileGroups = profileGroupUuids.filter(uuid => groups[uuid]);
+      
+      // Get the current profile's groupStyles
+      const activeProfile = profileManager.getActive();
+      const profileGroupStyles = activeProfile?.groupStyles || {};
+      
+      groupCountEl.textContent = profileGroups.length;
+      if (profileGroups.length === 0) { groupsContainer.innerHTML = '<div class="empty-state">NO GROUPS FOUND</div>'; return; }
       groupsContainer.innerHTML = '';
       
       // Sort by group name
-      const sortedEntries = uuids.map(uuid => ({ uuid, group: groups[uuid] }))
+      const sortedEntries = profileGroups.map(uuid => ({ uuid, group: groups[uuid] }))
         .sort((a, b) => a.group.name.localeCompare(b.group.name));
       
       sortedEntries.forEach(({ uuid, group }) => {
-        const style = preferences.groupStyles[uuid] || { color: '#4a9eff', secondaryColor: '#ffffff' };
+        const style = profileGroupStyles[uuid] || preferences.groupStyles[uuid] || { color: '#4a9eff', secondaryColor: '#ffffff' };
         const isActive = activeGroups[uuid] !== false;
         const icon = style.logoData ? `<img src="${style.logoData}" class="pin-icon">` : PIN_SVG(style.color, style.secondaryColor || '#ffffff');
         const item = document.createElement('div');
@@ -198,9 +411,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // --- Initialize ---
+  // Initialize ProfileManager (handles profile initialization and migration)
+  await profileManager.init();
+
   const state = await StorageManager.loadState();
   if (state.preferences) preferences = { ...preferences, ...state.preferences };
   if (state.activeGroups) activeGroups = state.activeGroups;
+  
+  // Load active groups state from the active profile
+  const activeProfile = profileManager.getActive();
+  if (activeProfile && activeProfile.activeGroups) {
+    activeGroups = { ...activeProfile.activeGroups };
+  } else if (activeProfile && activeProfile.groups) {
+    // First time or migration: activate all groups in the profile by default
+    activeGroups = {};
+    for (const groupUuid of Object.keys(activeProfile.groups)) {
+      activeGroups[groupUuid] = true;
+    }
+  }
+  
+  // Load groupStyles from the active profile
+  if (activeProfile && activeProfile.groupStyles) {
+    preferences.groupStyles = { ...activeProfile.groupStyles };
+  }
   
   // Migrate old yellow theme to new blue theme
   if (preferences.accentColor === '#d1ff00') {
@@ -248,10 +481,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const existing = preferences.sitePreferences[currentHost] || {};
     preferences.sitePreferences[currentHost] = { ...existing, siteEnabled: enabled, overlayEnabled: enabled };
     saveData();
+    
+    // Also notify tabs with full state including activeGroups
     StorageManager.notifyTabsForHost(currentHost, {
       action: 'toggle-site-enabled',
       enabled,
-      host: currentHost
+      host: currentHost,
+      activeGroups,
+      preferences
     });
     updateStatus(enabled ? 'SITE ON' : 'SITE OFF');
   });
@@ -293,8 +530,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (del && confirm(`Delete "${del.dataset.name}"?`)) {
       const uuid = del.dataset.uuid;
       await deletePOIGroup(uuid);
-      delete preferences.groupStyles[uuid];
       delete activeGroups[uuid];
+      // Remove from current profile (handles profile-specific style cleanup)
+      await profileManager.removeGroup(uuid);
       await saveData();
       await renderGroups();
     }
@@ -312,6 +550,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   groupsContainer.addEventListener('change', async (e) => {
     if (e.target.classList.contains('group-toggle')) {
       activeGroups[e.target.dataset.uuid] = e.target.checked;
+      
+      // Ensure preferences.groupStyles reflects the active profile's groupStyles
+      const activeProfile = profileManager.getActive();
+      if (activeProfile && activeProfile.groupStyles) {
+        preferences.groupStyles = { ...activeProfile.groupStyles };
+      }
+      
       await saveData();
     }
   });
@@ -331,26 +576,113 @@ document.addEventListener('DOMContentLoaded', async () => {
           // Check if it's our export format (array with name, icon, colors, data)
           if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0].data && jsonData[0].name) {
             isExportFormat = true;
-            const importedCount = await importGroupsData(jsonData);
-            if (importedCount > 0) {
-              // Mark all imported groups as active
-              const groups = await loadPOIGroups();
-              for (const uuid of Object.keys(groups)) {
-                if (activeGroups[uuid] === undefined) {
+            updateStatus('IMPORTING... (0 GROUPS)');
+            
+            // Ensure the current profile is set as active in storage before importing
+            const importProfile = profileManager.getActive();
+            if (importProfile) {
+              await chrome.storage.local.set({ activeProfile: importProfile.uuid });
+            }
+            
+            // Start import in background - don't await, let it run while UI remains responsive
+            (async () => {
+              const importedUuids = [];
+              try {
+                // Iterate through imported groups as they're parsed
+                for await (const { groupUuid, groupName, importCount } of importGroupsData(jsonData, false)) {
+                  updateStatus(`IMPORTING... (${importCount} GROUPS)`);
+                  console.log(`[IMPORT] Imported group: ${groupName} (${groupUuid})`);
+                  
+                  // Add to imported list and set active
+                  importedUuids.push(groupUuid);
+                  activeGroups[groupUuid] = true;
+                  
+                  // Update profile's activeGroups in storage
+                  const activeProfile = profileManager.getActive();
+                  if (activeProfile) {
+                    activeProfile.activeGroups = { ...activeGroups };
+                    const allProfiles = await chrome.storage.local.get(['profiles']);
+                    const profiles = allProfiles.profiles || {};
+                    profiles[activeProfile.uuid] = activeProfile;
+                    await chrome.storage.local.set({ profiles });
+                  }
+                  
+                  // Reload fresh groupStyles from storage
+                  const freshData = await chrome.storage.local.get(['profiles', 'activeProfile']);
+                  const activeProfileUuid = freshData.activeProfile;
+                  const profiles = freshData.profiles || {};
+                  const freshProfile = profiles[activeProfileUuid];
+                  if (freshProfile && freshProfile.groupStyles) {
+                    preferences.groupStyles = { ...freshProfile.groupStyles };
+                  }
+                  
+                  // Notify all tabs to update POIs for this group with snapshot of current state
+                  const groupsToSend = { ...activeGroups };
+                  console.log(`[IMPORT] Notifying tabs with activeGroups:`, groupsToSend);
+                  // Await the message send to ensure refresh is called before moving to next group
+                  await new Promise((resolve) => {
+                    chrome.tabs.query({}, (tabs) => {
+                      console.log(`[IMPORT] Found ${tabs.length} tabs to notify`);
+                      const promises = [];
+                      tabs.forEach(tab => {
+                        if (tab.url) {
+                          promises.push(
+                            new Promise((res) => {
+                              chrome.tabs.sendMessage(tab.id, {
+                                action: 'update-active-groups',
+                                activeGroups: groupsToSend,
+                                preferences
+                              }, () => res());
+                            })
+                          );
+                        }
+                      });
+                      Promise.all(promises).then(resolve);
+                    });
+                  });
+                  
+                  // Save to top-level storage for persistence
+                  console.log(`[IMPORT] Saving to top-level storage`);
+                  await StorageManager.saveState(preferences, activeGroups);
+                }
+              } catch (importError) {
+                console.error('[IMPORT] Error during import:', importError);
+              }
+              
+              // After import loop completes, render UI once with all groups
+              if (importedUuids.length > 0) {
+                console.log(`[IMPORT] All groups imported, rendering UI...`);
+                await renderGroups();
+                
+                // Add ONLY the imported groups to the active profile
+                for (const uuid of importedUuids) {
+                  await profileManager.addGroup(uuid);
                   activeGroups[uuid] = true;
                 }
+                
+                // Reload preferences AND group styles from active profile (fresh from storage)
+                const state = await StorageManager.loadState();
+                if (state.preferences) {
+                  preferences = { ...preferences, ...state.preferences };
+                }
+                
+                // Reload active profile fresh from storage to get newly imported groupStyles
+                const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
+                const activeProfileUuid = allProfiles.activeProfile;
+                const profiles = allProfiles.profiles || {};
+                const freshActiveProfile = profiles[activeProfileUuid];
+                if (freshActiveProfile && freshActiveProfile.groupStyles) {
+                  preferences.groupStyles = { ...freshActiveProfile.groupStyles };
+                }
+                
+                await saveData();
+                newGroupNameInput.value = '';
+                await renderGroups();
+                updateStatus(`IMPORTED ${importedUuids.length} GROUPS`);
               }
-              // Reload preferences to get the updated group styles
-              const state = await StorageManager.loadState();
-              if (state.preferences) {
-                preferences = { ...preferences, ...state.preferences };
-              }
-              await saveData();
-              newGroupNameInput.value = '';
-              await renderGroups();
-              updateStatus(`IMPORTED ${importedCount} GROUPS`);
-              return;
-            }
+            })(); // End of background import IIFE
+            
+            return;
           }
         } catch (e) {
           // Not JSON or not export format, continue with regular import
@@ -382,6 +714,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const uuid = await savePOIs(ungroupedPois, defaultGroupName);
                 if (uuid) {
                   activeGroups[uuid] = true;
+                  // Add to active profile
+                  await profileManager.addGroup(uuid);
                 }
               }
               
@@ -390,6 +724,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const uuid = await savePOIs(groupPois, groupName);
                 if (uuid) {
                   activeGroups[uuid] = true;
+                  // Add to active profile
+                  await profileManager.addGroup(uuid);
                 }
               }
               
@@ -405,6 +741,15 @@ document.addEventListener('DOMContentLoaded', async () => {
               const state = await StorageManager.loadState();
               if (state && state.preferences) {
                 preferences = { ...preferences, ...state.preferences };
+              }
+              
+              // Reload group styles from the active profile fresh from storage (newly created groups have styles)
+              const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
+              const activeProfileUuid = allProfiles.activeProfile;
+              const profiles = allProfiles.profiles || {};
+              const freshActiveProfile = profiles[activeProfileUuid];
+              if (freshActiveProfile && freshActiveProfile.groupStyles) {
+                preferences.groupStyles = { ...freshActiveProfile.groupStyles };
               }
               
               await saveData();
@@ -481,29 +826,99 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // Clear all groups handler
-  clearAllBtn.onclick = async () => {
-    const groupCount = Object.keys(activeGroups).length;
-    if (groupCount === 0) {
-      updateStatus('NO GROUPS TO CLEAR');
-      return;
-    }
-    
-    if (confirm(`Are you sure? This will DELETE all ${groupCount} group${groupCount !== 1 ? 's' : ''} and cannot be undone.`)) {
-      const groups = await loadPOIGroups();
-      for (const uuid of Object.keys(groups)) {
-        await deletePOIGroup(uuid);
-        delete preferences.groupStyles[uuid];
-        delete activeGroups[uuid];
+  if (clearAllBtn) {
+    console.log('[SETUP] Attaching clearAllBtn handler');
+    clearAllBtn.onclick = async () => {
+      console.log('[CLEAR] Clear button clicked');
+      const activeProfile = profileManager.getActive();
+      console.log('[CLEAR] Active profile:', activeProfile);
+      const profileGroupCount = activeProfile?.groupUuids?.length || 0;
+      console.log('[CLEAR] Group count:', profileGroupCount);
+      if (profileGroupCount === 0) {
+        updateStatus('NO GROUPS TO CLEAR');
+        return;
       }
-      await saveData();
-      // Notify all tabs to redraw
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-          chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
-        });
-      });
-      await renderGroups();
-      updateStatus(`CLEARED ALL GROUPS`);
+      
+      if (confirm(`Are you sure? This will DELETE all ${profileGroupCount} group${profileGroupCount !== 1 ? 's' : ''} in this profile and cannot be undone.`)) {
+        console.log('[CLEAR] User confirmed, starting clear...');
+        updateStatus('CLEARING... (0 GROUPS)');
+        
+        // Start clear in background - don't await, let it run while UI remains responsive
+        (async () => {
+          console.log('[CLEAR] IIFE started');
+          try {
+            let clearedCount = 0;
+            
+            // Use async generator to clear groups one-by-one with proper updates
+            console.log('[CLEAR] Calling deleteAllGroupsFromProfile with profileUuid:', activeProfile.uuid);
+            for await (const { groupUuid, groupName, deletedCount } of deleteAllGroupsFromProfile(activeProfile.uuid, false)) {
+              console.log('[CLEAR] Got result from generator:', groupName, deletedCount);
+              clearedCount = deletedCount;
+            updateStatus(`CLEARING... (${deletedCount}/${profileGroupCount})`);
+            console.log(`[CLEAR] Cleared group: ${groupName} (${groupUuid})`);
+            
+            // Remove from local state
+            delete activeGroups[groupUuid];
+            
+            // Notify all tabs to update their state - await to ensure refresh is called
+            const groupsToSend = { ...activeGroups };
+            console.log(`[CLEAR] Notifying tabs with activeGroups:`, groupsToSend);
+            await new Promise((resolve) => {
+              chrome.tabs.query({}, (tabs) => {
+                const promises = [];
+                tabs.forEach(tab => {
+                  if (tab.url) {
+                    promises.push(
+                      new Promise((res) => {
+                        chrome.tabs.sendMessage(tab.id, {
+                          action: 'update-active-groups',
+                          activeGroups: groupsToSend,
+                          preferences
+                        }, () => res());
+                      })
+                    );
+                  }
+                });
+                Promise.all(promises).then(resolve);
+              });
+            });
+            
+            // Save state
+            await StorageManager.saveState(preferences, activeGroups);
+          }
+          
+          // After all groups cleared, render UI once
+          console.log(`[CLEAR] All groups cleared, rendering UI...`);
+          await renderGroups();
+          
+          // Reload the profile fresh from storage and save to ensure persistence
+          // (the generator modified storage directly, so we need to sync the cache)
+          await profileManager.reload();
+          const finalProfile = profileManager.getActive();
+          if (finalProfile) {
+            // After reload, the profile should have empty groups
+            const allProfiles = await chrome.storage.local.get(['profiles']);
+            const profiles = allProfiles.profiles || {};
+            profiles[finalProfile.uuid] = finalProfile;
+            await chrome.storage.local.set({ profiles });
+            console.log(`[CLEAR] Profile saved with ${Object.keys(finalProfile.groups || {}).length} groups`);
+          }
+          
+          // Also save top-level state
+          await StorageManager.saveState(preferences, activeGroups);
+          
+          // Re-render profile menu to update group counts
+          await renderProfiles();
+          
+          updateStatus(`CLEARED ${clearedCount} GROUPS`);
+        } catch (err) {
+          console.error('Clear all error:', err);
+          updateStatus('CLEAR FAILED');
+        }
+      })(); // End of background clear IIFE
     }
   };
+  } else {
+    console.error('[SETUP] clearAllBtn not found in DOM');
+  }
 });
