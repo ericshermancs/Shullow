@@ -10,6 +10,23 @@ const PIN_SVG = (color, secondary) => `
 </svg>
 `;
 
+// Apply night mode immediately from storage before DOMContentLoaded
+(async () => {
+  const state = await StorageManager.loadState();
+  if (state.preferences?.nightMode) {
+    document.body.classList.add('night-mode');
+    const nightModeIcon = document.getElementById('night-mode-icon');
+    if (nightModeIcon) nightModeIcon.textContent = '☀️';
+    const nightModeToggle = document.getElementById('night-mode-toggle');
+    if (nightModeToggle) nightModeToggle.checked = true;
+  } else {
+    const nightModeIcon = document.getElementById('night-mode-icon');
+    if (nightModeIcon) nightModeIcon.textContent = '🌙';
+    const nightModeToggle = document.getElementById('night-mode-toggle');
+    if (nightModeToggle) nightModeToggle.checked = false;
+  }
+})();
+
 document.addEventListener('DOMContentLoaded', async () => {
   const overlayToggle = document.getElementById('overlay-toggle');
   const debugToggle = document.getElementById('debug-toggle');
@@ -506,14 +523,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   applyTheme(preferences.accentColor);
-    // Apply night mode if enabled
-    if (preferences.nightMode) {
-      document.body.classList.add('night-mode');
-      nightModeIcon.textContent = '☀️';
-    } else {
-      document.body.classList.remove('night-mode');
-      nightModeIcon.textContent = '🌙';
-    }
+  // Night mode already applied synchronously in the IIFE above, so just update toggle state
+  nightModeToggle.checked = preferences.nightMode;
   await renderGroups();
   updateStatus('SYSTEM READY');
 
