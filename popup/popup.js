@@ -43,6 +43,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const previews = document.querySelectorAll('.theme-color-preview');
     previews.forEach(p => p.style.background = color);
   };
+  const updateDisableAllButton = () => {
+    if (!disableAllBtn) return;
+    const groupCount = Object.keys(activeGroups).length;
+    const allDisabled = groupCount > 0 && Object.values(activeGroups).every(v => v === false);
+    if (allDisabled) {
+      disableAllBtn.textContent = 'ENABLE ALL';
+      disableAllBtn.classList.add('enable-all-btn');
+    } else {
+      disableAllBtn.textContent = 'DISABLE ALL';
+      disableAllBtn.classList.remove('enable-all-btn');
+    }
+  };
   const saveData = async () => {
     // Save both to top level (for backwards compat) and to active profile
     const activeProfile = profileManager.getActive();
@@ -161,13 +173,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         const item = document.createElement('div');
         item.className = `profile-item ${isActive ? 'active' : ''}`;
         item.innerHTML = `
-          <span class="profile-item-name">${profile.name}</span>
+          <span class="profile-item-name" data-uuid="${profile.uuid}">${profile.name}</span>
+          <button class="profile-edit-btn" data-uuid="${profile.uuid}" title="Rename profile">✎</button>
           <span class="profile-item-count">${groupCount} group${groupCount !== 1 ? 's' : ''}</span>
           ${!isActive ? `<button class="profile-delete-btn" data-uuid="${profile.uuid}" title="Delete profile">&times;</button>` : ''}
         `;
 
         // Click to switch profile
         item.onclick = async (e) => {
+          if (e.target.closest('.profile-edit-btn')) {
+            // Handle rename
+            const uuid = e.target.dataset.uuid;
+            const profileToRename = allProfiles[uuid];
+            const oldName = profileToRename.name;
+            const nameSpan = item.querySelector('.profile-item-name');
+            const input = document.createElement('input');
+            input.className = 'profile-name-input';
+            input.value = oldName;
+            nameSpan.innerHTML = '';
+            nameSpan.appendChild(input);
+            input.focus();
+            input.select();
+            const done = async (save) => {
+              const val = input.value.trim();
+              if (save && val && val !== oldName) {
+                profileToRename.name = val;
+                const allProfiles = await chrome.storage.local.get(['profiles']);
+                const profiles = allProfiles.profiles || {};
+                profiles[uuid] = profileToRename;
+                await chrome.storage.local.set({ profiles });
+                await profileManager.reload();
+                await renderProfiles();
+                updateStatus(`RENAMED PROFILE: ${val.toUpperCase()}`);
+              } else { nameSpan.textContent = oldName; }
+            };
+            input.onblur = () => done(true);
+            input.onkeydown = (ev) => { if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') done(false); };
+            return;
+          }
+          
           if (e.target.closest('.profile-delete-btn')) {
             // Handle delete
             const uuid = e.target.dataset.uuid;
@@ -243,10 +287,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         await saveData();
 
-        // Trigger redraw on all tabs
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
+        // Trigger redraw on all tabs - await to ensure they get the message
+        await new Promise((resolve) => {
+          chrome.tabs.query({}, (tabs) => {
+            const promises = [];
+            tabs.forEach(tab => {
+              if (tab.url) {
+                promises.push(
+                  new Promise((res) => {
+                    chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }, () => res());
+                  })
+                );
+              }
+            });
+            Promise.all(promises).then(resolve);
           });
         });
 
@@ -407,6 +461,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
         groupsContainer.appendChild(item);
       });
+      updateDisableAllButton();
     } catch (e) { console.error('Render error', e); }
   };
 
@@ -524,6 +579,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
       input.onblur = () => done(true);
       input.onkeydown = (ev) => { if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') done(false); };
+      return;
     }
 
     const del = e.target.closest('.delete-btn');
@@ -558,6 +614,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       await saveData();
+      updateDisableAllButton();
     }
   });
 
@@ -740,27 +797,59 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  // Disable all groups handler
+  // Disable/Enable all groups handler
   disableAllBtn.onclick = async () => {
     const groupCount = Object.keys(activeGroups).length;
     if (groupCount === 0) {
-      updateStatus('NO GROUPS TO DISABLE');
+      updateStatus('NO GROUPS TO TOGGLE');
       return;
     }
     
-    if (confirm(`Disable all ${groupCount} group${groupCount !== 1 ? 's' : ''}?`)) {
+    const allDisabled = Object.values(activeGroups).every(v => v === false);
+    const actionText = allDisabled ? 'Enable' : 'Disable';
+    
+    if (confirm(`${actionText} all ${groupCount} group${groupCount !== 1 ? 's' : ''}?`)) {
+      console.log('[DISABLE-ALL] Starting, allDisabled=', allDisabled);
       for (const uuid of Object.keys(activeGroups)) {
-        activeGroups[uuid] = false;
+        activeGroups[uuid] = allDisabled;
       }
+      console.log('[DISABLE-ALL] Updated activeGroups:', activeGroups);
       await saveData();
-      // Notify all tabs to redraw
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-          chrome.tabs.sendMessage(tab.id, { action: 'reload-overlay' }).catch(() => {});
+      console.log('[DISABLE-ALL] Data saved to storage');
+      
+      // Notify all tabs with the updated activeGroups
+      const groupsToSend = { ...activeGroups };
+      await new Promise((resolve) => {
+        chrome.tabs.query({}, (tabs) => {
+          console.log('[DISABLE-ALL] Queried tabs, count=', tabs.length);
+          const promises = [];
+          tabs.forEach(tab => {
+            if (tab.url) {
+              console.log('[DISABLE-ALL] Sending update-active-groups to tab:', tab.url);
+              promises.push(
+                new Promise((res) => {
+                  chrome.tabs.sendMessage(tab.id, {
+                    action: 'update-active-groups',
+                    activeGroups: groupsToSend,
+                    preferences
+                  }, () => {
+                    console.log('[DISABLE-ALL] Got response from tab');
+                    res();
+                  });
+                })
+              );
+            }
+          });
+          Promise.all(promises).then(() => {
+            console.log('[DISABLE-ALL] All tabs notified');
+            resolve();
+          });
         });
       });
       await renderGroups();
-      updateStatus(`DISABLED ${groupCount} GROUP${groupCount !== 1 ? 'S' : ''}`);
+      const statusText = allDisabled ? `ENABLED ${groupCount} GROUP${groupCount !== 1 ? 'S' : ''}` : `DISABLED ${groupCount} GROUP${groupCount !== 1 ? 'S' : ''}`;
+      updateStatus(statusText);
+      console.log('[DISABLE-ALL] Complete:', statusText);
     }
   };
 

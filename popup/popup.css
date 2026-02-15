@@ -882,6 +882,25 @@ canvas {
   color: #ff2020;
 }
 
+.profile-edit-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid var(--accent-color);
+  color: var(--accent-color);
+  padding: 2px 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: color 0.2s, border-color 0.2s;
+  margin-left: 6px;
+  margin-right: 6px;
+}
+
+.profile-edit-btn:hover {
+  color: var(--accent-dark);
+  border-bottom-color: var(--accent-dark);
+}
+
 .new-profile-section {
   display: flex;
   flex-direction: column;
