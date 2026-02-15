@@ -173,7 +173,10 @@ class POIStateManager {
       if (!siteEnabled) {
         console.log('[STATE] Site is disabled, clearing all POIs');
         this._clearAllPOIs();
-        this._lastActiveGroups = { ...this._activeGroups };
+        // Reset lastActiveGroups and clear cache so when site is re-enabled, all groups are rebuilt fresh
+        this._lastActiveGroups = {};
+        this._poiCache = null;
+        this._poiCacheTime = 0;
         return;
       }
 
@@ -191,14 +194,17 @@ class POIStateManager {
         return;
       }
       
+      // Check if site was just re-enabled: lastSelected was empty but selected is not
+      const wasDisabled = lastSelected.length === 0 && selected.length > 0;
+      
       // Optimization: If only removing groups, filter instead of rebuild
-      if (removed.length > 0 && selected.length > 0) {
+      if (!wasDisabled && removed.length > 0 && selected.length > 0) {
         this._filterPOIsForRemovedGroups(removed);
         this._lastActiveGroups = { ...this._activeGroups };
         return;
       }
       
-      // Full rebuild for new groups
+      // Full rebuild for new groups or when re-enabled
       await this._rebuildAllPOIs(selected);
       this._lastActiveGroups = { ...this._activeGroups };
     } finally {
@@ -240,15 +246,19 @@ class POIStateManager {
    * @private
    */
   async _rebuildAllPOIs(selected) {
+    console.log('[STATE] _rebuildAllPOIs() called with selected:', selected);
     const poiGroups = await this._getPoiGroups();
+    console.log('[STATE] _rebuildAllPOIs() got poiGroups with keys:', Object.keys(poiGroups));
     const all = [];
     const bridgePois = [];
     
     selected.forEach(uuid => {
       const group = poiGroups[uuid];
+      console.log(`[STATE] _rebuildAllPOIs() looking for uuid=${uuid}, found?:`, !!group);
       if (!group) return;
       
       const groupPois = group.pois || [];
+      console.log(`[STATE] _rebuildAllPOIs() group "${group.name}" has ${groupPois.length} POIs`);
       const groupName = group.name;
       const style = this._preferences.groupStyles[uuid] || {};
       const color = style.color || this._preferences.accentColor;
@@ -278,20 +288,47 @@ class POIStateManager {
   }
 
   /**
-   * Gets POI groups from cache or storage
+   * Gets POI groups from cache or storage.
+   * Groups are now stored per-profile, so we need to fetch from the active profile.
    * @private
    */
   async _getPoiGroups() {
     const cacheAge = Date.now() - this._poiCacheTime;
     if (this._poiCache && cacheAge < 60000) {
+      console.log('[STATE] _getPoiGroups() returning cached data (age:', cacheAge, 'ms)');
       return this._poiCache;
     }
     
-    const data = await chrome.storage.local.get(['poiGroups']);
-    const poiGroups = data.poiGroups || {};
-    this._poiCache = poiGroups;
-    this._poiCacheTime = Date.now();
-    return poiGroups;
+    console.log('[STATE] _getPoiGroups() reading fresh from storage...');
+    try {
+      // Try new per-profile storage first
+      const data = await chrome.storage.local.get(['profiles', 'activeProfile', 'poiGroups']);
+      const profiles = data.profiles || {};
+      const activeProfileUuid = data.activeProfile;
+      const activeProfile = profiles[activeProfileUuid];
+      
+      console.log('[STATE] _getPoiGroups() activeProfileUuid:', activeProfileUuid);
+      console.log('[STATE] _getPoiGroups() activeProfile exists?', !!activeProfile);
+      if (activeProfile) console.log('[STATE] _getPoiGroups() activeProfile.groups keys:', Object.keys(activeProfile.groups || {}));
+      
+      let poiGroups = {};
+      
+      // Get groups from active profile (new per-profile storage)
+      if (activeProfile && activeProfile.groups) {
+        poiGroups = activeProfile.groups;
+      } else {
+        // Fallback to legacy global poiGroups for backwards compatibility
+        poiGroups = data.poiGroups || {};
+      }
+      
+      console.log('[STATE] _getPoiGroups() returning groups with keys:', Object.keys(poiGroups));
+      this._poiCache = poiGroups;
+      this._poiCacheTime = Date.now();
+      return poiGroups;
+    } catch (e) {
+      console.error('[STATE] Error getting POI groups:', e);
+      return {};
+    }
   }
 
   /**
