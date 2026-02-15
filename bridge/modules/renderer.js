@@ -266,7 +266,7 @@ window.poiRenderer = {
                 // Bounds Check
                 if (!bounds.contains(latLng)) return;
                 
-                const id = poi.id || poi.name;
+                const id = poi.id || (poi._renderId = poi._renderId || crypto.randomUUID());
                 visibleIds.add(id);
                 
                 const pos = projection.fromLatLngToDivPixel(latLng);
@@ -355,7 +355,7 @@ window.poiRenderer = {
     const usedIds = new Set();
 
     pois.forEach(poi => {
-       const id = `${map._poiUid}-${poi.id || poi.name}`;
+       const id = `${map._poiUid}-${poi.id || (poi._renderId = poi._renderId || crypto.randomUUID())}`;
        usedIds.add(id);
        
        if (this.activeMarkers.has(id)) return;
