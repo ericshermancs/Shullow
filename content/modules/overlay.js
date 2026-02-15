@@ -204,7 +204,13 @@ class OverlayManager {
    * Shows a detail popup for the clicked POI.
    */
   handleNativeClick(id, lat, lng) {
-    const poi = this.markerData.find(p => (p.id || p.name) === id);
+    // Match by UUID first (most reliable), then fall back to coordinates
+    let poi = this.markerData.find(p => p._hoverId === id);
+    if (!poi) {
+      poi = this.markerData.find(p => Math.abs(p.latitude - lat) < 0.0001 && Math.abs(p.longitude - lng) < 0.0001);
+      // Cache the UUID for future matches
+      if (poi) poi._hoverId = id;
+    }
     if (poi) {
       const pref = window.poiState.preferences;
       const style = pref.groupStyles[poi.groupUuid] || {};
@@ -220,7 +226,13 @@ class OverlayManager {
    * Shows a detail popup after a brief delay to prevent flicker.
    */
   handleNativeHover(id, lat, lng) {
-    const poi = this.markerData.find(p => (p.id || p.name) === id);
+    // Match by UUID first (most reliable), then fall back to coordinates
+    let poi = this.markerData.find(p => p._hoverId === id);
+    if (!poi) {
+      poi = this.markerData.find(p => Math.abs(p.latitude - lat) < 0.0001 && Math.abs(p.longitude - lng) < 0.0001);
+      // Cache the UUID for future matches
+      if (poi) poi._hoverId = id;
+    }
     if (poi) {
       if (this.hoverTimeout) clearTimeout(this.hoverTimeout);
 
