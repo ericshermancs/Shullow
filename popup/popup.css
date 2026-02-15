@@ -90,6 +90,44 @@ h2 {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  position: relative;
+}
+
+.section-header h2 {
+  flex: 1;
+}
+
+.groups-header-wrapper {
+  display: flex;
+  align-items: center;
+  position: relative;
+  flex: 1;
+}
+
+.groups-header-wrapper h2 {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  margin: 0;
+}
+
+.groups-header-wrapper .group-actions-menu {
+  position: absolute;
+  left: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.groups-header-wrapper:hover h2 {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.groups-header-wrapper:hover .group-actions-menu {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .controls {
@@ -465,6 +503,7 @@ input:checked + .slider:before {
   right: 0;
   opacity: 1;
   pointer-events: auto;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .count-export-wrapper .export-btn {
@@ -500,6 +539,34 @@ input:checked + .slider:before {
 .count-export-wrapper .export-btn:hover {
   background: rgba(74, 158, 255, 0.2);
   border-color: var(--accent-color);
+}
+
+.groups-header-wrapper .action-btn {
+  font-size: 0.65rem;
+  color: var(--accent-color);
+  background: rgba(74, 158, 255, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: opacity 0.3s ease, background 0.2s ease;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+
+.groups-header-wrapper .action-btn:hover {
+  background: rgba(74, 158, 255, 0.2);
+  border-color: var(--accent-color);
+}
+
+.groups-header-wrapper .action-btn.danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.groups-header-wrapper .action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
 }
 
 /* Modal Styles */

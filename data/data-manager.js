@@ -115,6 +115,30 @@ export function importData(dataString, format) {
  * @param {string} uuid - Optional UUID for the group (generates new one if not provided)
  * @returns {Promise<string>} UUID of the created/updated group
  */
+/**
+ * Generates a random color for POI pins
+ */
+function generateRandomColor() {
+  const colors = [
+    '#FF6B6B', // Red
+    '#4ECDC4', // Teal
+    '#45B7D1', // Blue
+    '#FFA07A', // Salmon
+    '#98D8C8', // Mint
+    '#F7DC6F', // Yellow
+    '#BB8FCE', // Purple
+    '#85C1E2', // Sky Blue
+    '#F8B739', // Orange
+    '#52C4B1', // Turquoise
+    '#FF8A80', // Light Red
+    '#81C784', // Green
+    '#64B5F6', // Light Blue
+    '#FFB74D', // Light Orange
+    '#E91E63'  // Pink
+  ];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
 export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = null) {
   if (!groupName) return null;
   
@@ -122,15 +146,25 @@ export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = n
   
   const storage = useSyncStorage ? chrome.storage.sync : chrome.storage.local;
   try {
-    const data = await storage.get(['poiGroups']);
+    const data = await storage.get(['poiGroups', 'preferences']);
     const poiGroups = data.poiGroups || {};
+    const preferences = data.preferences || {};
     
     const groupUuid = uuid || generateUUID();
+    const isNewGroup = !poiGroups[groupUuid];
     
-    if (!poiGroups[groupUuid]) {
+    if (isNewGroup) {
       poiGroups[groupUuid] = {
         name: groupName,
         pois: []
+      };
+      
+      // Assign random color to new group
+      if (!preferences.groupStyles) preferences.groupStyles = {};
+      preferences.groupStyles[groupUuid] = {
+        color: generateRandomColor(),
+        secondaryColor: '#ffffff',
+        logoData: null
       };
     }
     
@@ -138,7 +172,7 @@ export async function savePOIs(pois, groupName, useSyncStorage = false, uuid = n
     poiGroups[groupUuid].pois = poiGroups[groupUuid].pois.concat(pois);
     poiGroups[groupUuid].name = groupName; // Update name in case it changed
     
-    await storage.set({ poiGroups });
+    await storage.set({ poiGroups, preferences });
     console.log(`Saved ${pois.length} POIs to group: ${groupName} (${groupUuid})`);
     return groupUuid;
   } catch (error) {

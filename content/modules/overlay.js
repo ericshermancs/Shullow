@@ -254,12 +254,21 @@ class OverlayManager {
 
     this.activePopup = document.createElement('div');
     this.activePopup.className = 'poi-detail-popup';
+    
+    // Determine colors based on night mode preference
+    const pref = window.poiState?.preferences || {};
+    const isNightMode = pref.nightMode || false;
+    const bgColor = isNightMode ? '#2c313a' : '#f8f9fa';
+    const textColor = isNightMode ? '#f3f4f6' : '#22272e';
+    const borderColor = isNightMode ? '#3a3f4b' : '#e5e7eb';
+    const accentColor = pref.accentColor || '#4a9eff';
+    
     this.activePopup.style.cssText = `
       position: absolute; left: ${x}px; top: ${y - 42}px; transform: translate(-50%, -100%);
-      background: rgba(0, 0, 0, 0.95); color: #ffffff; font-family: monospace; font-size: 12px;
-      border: 1px solid ${color}; padding: 10px; z-index: 2147483647; pointer-events: auto;
+      background: ${bgColor}; color: ${textColor}; font-family: monospace; font-size: 12px;
+      border: 1px solid ${borderColor}; padding: 10px; z-index: 2147483647; pointer-events: auto;
       white-space: normal; width: max-content; max-width: 250px; cursor: default;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 10px ${color}44; border-radius: 4px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2), 0 0 10px ${accentColor}44; border-radius: 8px;
       transition: top 0.1s linear, left 0.1s linear;
     `;
 
@@ -272,12 +281,11 @@ class OverlayManager {
     };
 
     this.activePopup.innerHTML = `
-      <div style="font-weight: bold; border-bottom: 1px solid ${color}; margin-bottom: 6px; padding-bottom: 4px; color: #ffffff !important;">${poi.name}</div>
-      <div style="font-size: 10px; opacity: 0.9; color: #cccccc !important;">GROUP: ${poi.groupName.toUpperCase()}</div>
-      <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: #ffffff !important;">${poi.address || 'No address available'}</div>
+      <div style="font-weight: bold; border-bottom: 1px solid ${borderColor}; margin-bottom: 6px; padding-bottom: 4px; color: ${textColor} !important;">${poi.name}</div>
+      <div style="font-size: 11px; margin-top: 6px; line-height: 1.3; color: ${textColor} !important;">${poi.address || 'No address available'}</div>
       ${Object.entries(poi)
         .filter(([k, v]) => !['name', 'groupName', 'groupUuid', 'address', 'latitude', 'longitude', 'id', 'color', 'secondaryColor', 'logoData'].includes(k) && v !== null && v !== undefined && String(v).trim() !== '')
-        .map(([k, v]) => `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px; color: #dddddd !important;">${k.toUpperCase()}: ${v}</div>`)
+        .map(([k, v]) => `<div style="font-size: 9px; opacity: 0.7; margin-top: 2px; color: ${textColor};">${k.toUpperCase()}: ${v}</div>`)
         .join('')}
     `;
     this.overlay.appendChild(this.activePopup);
