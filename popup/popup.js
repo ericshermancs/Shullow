@@ -1,4 +1,4 @@
-import { loadPOIGroups, savePOIs, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData, deleteAllGroupsFromProfile } from '../data/data-manager.js';
+import { loadPOIGroups, savePOIs, savePOIsBatch, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData, deleteAllGroupsFromProfile } from '../data/data-manager.js';
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
 import { profileManager } from './modules/profile-manager.js';
@@ -584,89 +584,105 @@ document.addEventListener('DOMContentLoaded', async () => {
               await chrome.storage.local.set({ activeProfile: importProfile.uuid });
             }
             
-            // Start import in background - don't await, let it run while UI remains responsive
+            // Import in background to keep UI responsive
             (async () => {
-              const importedUuids = [];
               try {
-                // Iterate through imported groups as they're parsed
-                for await (const { groupUuid, groupName, importCount } of importGroupsData(jsonData, false)) {
-                  updateStatus(`IMPORTING... (${importCount} GROUPS)`);
-                  console.log(`[IMPORT] Imported group: ${groupName} (${groupUuid})`);
-                  
-                  // Add to imported list and set active
-                  importedUuids.push(groupUuid);
-                  activeGroups[groupUuid] = true;
-                  
-                  // Update profile's activeGroups in storage
-                  const activeProfile = profileManager.getActive();
-                  if (activeProfile) {
-                    activeProfile.activeGroups = { ...activeGroups };
-                    const allProfiles = await chrome.storage.local.get(['profiles']);
-                    const profiles = allProfiles.profiles || {};
-                    profiles[activeProfile.uuid] = activeProfile;
-                    await chrome.storage.local.set({ profiles });
+                // Single batch: parses all groups, saves once to storage
+                const imported = await importGroupsData(jsonData, false);
+                
+                if (imported.length > 0) {
+                  // Set all imported groups as active
+                  for (const { groupUuid } of imported) {
+                    activeGroups[groupUuid] = true;
                   }
                   
-                  // Reload fresh groupStyles from storage
-                  const freshData = await chrome.storage.local.get(['profiles', 'activeProfile']);
-                  const activeProfileUuid = freshData.activeProfile;
-                  const profiles = freshData.profiles || {};
-                  const freshProfile = profiles[activeProfileUuid];
-                  if (freshProfile && freshProfile.groupStyles) {
-                    preferences.groupStyles = { ...freshProfile.groupStyles };
+                  // Reload profile manager cache (groupUuids were updated by importGroupsData)
+                  await profileManager.reload();
+                  
+                  // Reload group styles from the active profile fresh from storage
+                  const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
+                  const activeProfileUuid = allProfiles.activeProfile;
+                  const profiles = allProfiles.profiles || {};
+                  const freshActiveProfile = profiles[activeProfileUuid];
+                  if (freshActiveProfile && freshActiveProfile.groupStyles) {
+                    preferences.groupStyles = { ...freshActiveProfile.groupStyles };
                   }
                   
-                  // Notify all tabs to update POIs for this group with snapshot of current state
-                  const groupsToSend = { ...activeGroups };
-                  console.log(`[IMPORT] Notifying tabs with activeGroups:`, groupsToSend);
-                  // Await the message send to ensure refresh is called before moving to next group
-                  await new Promise((resolve) => {
-                    chrome.tabs.query({}, (tabs) => {
-                      console.log(`[IMPORT] Found ${tabs.length} tabs to notify`);
-                      const promises = [];
-                      tabs.forEach(tab => {
-                        if (tab.url) {
-                          promises.push(
-                            new Promise((res) => {
-                              chrome.tabs.sendMessage(tab.id, {
-                                action: 'update-active-groups',
-                                activeGroups: groupsToSend,
-                                preferences
-                              }, () => res());
-                            })
-                          );
-                        }
-                      });
-                      Promise.all(promises).then(resolve);
-                    });
-                  });
-                  
-                  // Save to top-level storage for persistence
-                  console.log(`[IMPORT] Saving to top-level storage`);
-                  await StorageManager.saveState(preferences, activeGroups);
+                  await saveData();
+                  newGroupNameInput.value = '';
+                  await renderGroups();
+                  updateStatus(`IMPORTED ${imported.length} GROUPS`);
                 }
               } catch (importError) {
                 console.error('[IMPORT] Error during import:', importError);
+                updateStatus('IMPORT FAILED');
               }
-              
-              // After import loop completes, render UI once with all groups
-              if (importedUuids.length > 0) {
-                console.log(`[IMPORT] All groups imported, rendering UI...`);
-                await renderGroups();
+            })();
+            
+            return;
+          }
+        } catch (e) {
+          // Not JSON or not export format, continue with regular import
+        }
+        
+        // Regular CSV/JSON import
+        if (!isExportFormat) {
+          const defaultGroupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+          updateStatus('IMPORTING... (0 POIs)');
+          
+          // Parse data synchronously (one-time parse is OK, storage ops run async)
+          let pois;
+          let groupedPois = {};
+          let ungroupedPois = [];
+          
+          try {
+            pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
+            if (pois.length) {
+              // Group POIs by groupName if specified
+              for (const poi of pois) {
+                if (poi.groupName) {
+                  if (!groupedPois[poi.groupName]) {
+                    groupedPois[poi.groupName] = [];
+                  }
+                  groupedPois[poi.groupName].push(poi);
+                } else {
+                  ungroupedPois.push(poi);
+                }
+              }
+            }
+          } catch (importErr) {
+            console.error('Import validation error:', importErr);
+            alert(`Import Error:\n\n${importErr.message}`);
+            updateStatus('IMPORT FAILED');
+            return;
+          }
+          
+          // Now run storage operations in background (don't await, let UI stay responsive)
+          if (pois.length) {
+            (async () => {
+              try {
+                // Build batch of groups to save
+                const groupsToSave = [];
                 
-                // Add ONLY the imported groups to the active profile
-                for (const uuid of importedUuids) {
-                  await profileManager.addGroup(uuid);
+                if (ungroupedPois.length > 0) {
+                  groupsToSave.push({ pois: ungroupedPois, groupName: defaultGroupName });
+                }
+                for (const [groupName, groupPois] of Object.entries(groupedPois)) {
+                  groupsToSave.push({ pois: groupPois, groupName });
+                }
+                
+                // Single batch save: one storage read + one storage write for all groups
+                const createdUuids = await savePOIsBatch(groupsToSave);
+                
+                // Set all created groups as active
+                for (const uuid of createdUuids) {
                   activeGroups[uuid] = true;
                 }
                 
-                // Reload preferences AND group styles from active profile (fresh from storage)
-                const state = await StorageManager.loadState();
-                if (state.preferences) {
-                  preferences = { ...preferences, ...state.preferences };
-                }
+                // Reload profile manager cache (groupUuids were updated by savePOIsBatch)
+                await profileManager.reload();
                 
-                // Reload active profile fresh from storage to get newly imported groupStyles
+                // Reload group styles from the active profile fresh from storage
                 const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
                 const activeProfileUuid = allProfiles.activeProfile;
                 const profiles = allProfiles.profiles || {};
@@ -678,90 +694,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await saveData();
                 newGroupNameInput.value = '';
                 await renderGroups();
-                updateStatus(`IMPORTED ${importedUuids.length} GROUPS`);
+                const totalCount = Object.keys(groupedPois).length;
+                updateStatus(`IMPORTED ${pois.length} POIs IN ${totalCount > 0 ? totalCount + ' GROUPS' : defaultGroupName}`);
+              } catch (importErr) {
+                console.error('Import error during storage operations:', importErr);
+                updateStatus('IMPORT FAILED');
               }
-            })(); // End of background import IIFE
-            
-            return;
-          }
-        } catch (e) {
-          // Not JSON or not export format, continue with regular import
-        }
-        
-        // Regular CSV/JSON import
-        if (!isExportFormat) {
-          const defaultGroupName = newGroupNameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
-          try {
-            const pois = importData(content, file.name.endsWith('.json') ? 'json' : 'csv');
-            if (pois.length) {
-              // Group POIs by groupName if specified, otherwise use default group
-              const groupedPois = {};
-              const ungroupedPois = [];
-              
-              for (const poi of pois) {
-                if (poi.groupName) {
-                  if (!groupedPois[poi.groupName]) {
-                    groupedPois[poi.groupName] = [];
-                  }
-                  groupedPois[poi.groupName].push(poi);
-                } else {
-                  ungroupedPois.push(poi);
-                }
-              }
-              
-              // Save ungrouped POIs to default group if any
-              if (ungroupedPois.length > 0) {
-                const uuid = await savePOIs(ungroupedPois, defaultGroupName);
-                if (uuid) {
-                  activeGroups[uuid] = true;
-                  // Add to active profile
-                  await profileManager.addGroup(uuid);
-                }
-              }
-              
-              // Save grouped POIs to their named groups
-              for (const [groupName, groupPois] of Object.entries(groupedPois)) {
-                const uuid = await savePOIs(groupPois, groupName);
-                if (uuid) {
-                  activeGroups[uuid] = true;
-                  // Add to active profile
-                  await profileManager.addGroup(uuid);
-                }
-              }
-              
-              // Reload all groups to ensure metadata is current
-              const loadedGroups = await loadPOIGroups();
-              for (const uuid of Object.keys(loadedGroups)) {
-                if (activeGroups[uuid] === undefined) {
-                  activeGroups[uuid] = true;
-                }
-              }
-              
-              // Reload preferences to get the updated group styles
-              const state = await StorageManager.loadState();
-              if (state && state.preferences) {
-                preferences = { ...preferences, ...state.preferences };
-              }
-              
-              // Reload group styles from the active profile fresh from storage (newly created groups have styles)
-              const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
-              const activeProfileUuid = allProfiles.activeProfile;
-              const profiles = allProfiles.profiles || {};
-              const freshActiveProfile = profiles[activeProfileUuid];
-              if (freshActiveProfile && freshActiveProfile.groupStyles) {
-                preferences.groupStyles = { ...freshActiveProfile.groupStyles };
-              }
-              
-              await saveData();
-              newGroupNameInput.value = '';
-              await renderGroups();
-              const totalCount = Object.keys(groupedPois).length;
-              updateStatus(`IMPORTED ${pois.length} POIs IN ${totalCount > 0 ? totalCount + ' GROUPS' : defaultGroupName}`);
-            }
-          } catch (importErr) {
-            console.error('Import validation error:', importErr);
-            alert(`Import Error:\n\n${importErr.message}`);
-            updateStatus('IMPORT FAILED');
+            })();
           }
         }
       } catch (err) {
@@ -847,20 +786,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         (async () => {
           console.log('[CLEAR] IIFE started');
           try {
-            let clearedCount = 0;
+            // Single batch delete: clears all groups, removes from activeGroups, writes once to storage
+            const deletedGroups = await deleteAllGroupsFromProfile(activeProfile.uuid, false);
+            console.log('[CLEAR] deleteAllGroupsFromProfile completed, deleted:', deletedGroups.length);
             
-            // Use async generator to clear groups one-by-one with proper updates
-            console.log('[CLEAR] Calling deleteAllGroupsFromProfile with profileUuid:', activeProfile.uuid);
-            for await (const { groupUuid, groupName, deletedCount } of deleteAllGroupsFromProfile(activeProfile.uuid, false)) {
-              console.log('[CLEAR] Got result from generator:', groupName, deletedCount);
-              clearedCount = deletedCount;
-            updateStatus(`CLEARING... (${deletedCount}/${profileGroupCount})`);
-            console.log(`[CLEAR] Cleared group: ${groupName} (${groupUuid})`);
+            let deletedCount = 0;
             
-            // Remove from local state
-            delete activeGroups[groupUuid];
+            // Remove from local activeGroups state
+            for (const { groupUuid, groupName } of deletedGroups) {
+              console.log(`[CLEAR] Cleared group: ${groupName} (${groupUuid})`);
+              delete activeGroups[groupUuid];
+              deletedCount++;
+              updateStatus(`CLEARING... (${deletedCount}/${profileGroupCount})`);
+            }
             
-            // Notify all tabs to update their state - await to ensure refresh is called
+            // Notify all tabs to update their state
             const groupsToSend = { ...activeGroups };
             console.log(`[CLEAR] Notifying tabs with activeGroups:`, groupsToSend);
             await new Promise((resolve) => {
@@ -883,41 +823,25 @@ document.addEventListener('DOMContentLoaded', async () => {
               });
             });
             
-            // Save state
+            // Save activeGroups state to storage
             await StorageManager.saveState(preferences, activeGroups);
+            
+            // Reload profile manager cache and render UI
+            console.log(`[CLEAR] All groups cleared, reloading profile and rendering UI...`);
+            await profileManager.reload();
+            await renderGroups();
+            
+            // Re-render profile menu to update group counts
+            await renderProfiles();
+            
+            updateStatus(`CLEARED ${deletedCount} GROUPS`);
+          } catch (err) {
+            console.error('Clear all error:', err);
+            updateStatus('CLEAR FAILED');
           }
-          
-          // After all groups cleared, render UI once
-          console.log(`[CLEAR] All groups cleared, rendering UI...`);
-          await renderGroups();
-          
-          // Reload the profile fresh from storage and save to ensure persistence
-          // (the generator modified storage directly, so we need to sync the cache)
-          await profileManager.reload();
-          const finalProfile = profileManager.getActive();
-          if (finalProfile) {
-            // After reload, the profile should have empty groups
-            const allProfiles = await chrome.storage.local.get(['profiles']);
-            const profiles = allProfiles.profiles || {};
-            profiles[finalProfile.uuid] = finalProfile;
-            await chrome.storage.local.set({ profiles });
-            console.log(`[CLEAR] Profile saved with ${Object.keys(finalProfile.groups || {}).length} groups`);
-          }
-          
-          // Also save top-level state
-          await StorageManager.saveState(preferences, activeGroups);
-          
-          // Re-render profile menu to update group counts
-          await renderProfiles();
-          
-          updateStatus(`CLEARED ${clearedCount} GROUPS`);
-        } catch (err) {
-          console.error('Clear all error:', err);
-          updateStatus('CLEAR FAILED');
-        }
-      })(); // End of background clear IIFE
-    }
-  };
+        })(); // End of background clear IIFE
+      }
+    };
   } else {
     console.error('[SETUP] clearAllBtn not found in DOM');
   }

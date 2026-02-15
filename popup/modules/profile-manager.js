@@ -10,6 +10,7 @@ import {
   switchProfile as switchProfileInStorage,
   deleteProfile as deleteProfileFromStorage,
   addGroupToProfile as addGroupToProfileInStorage,
+  addGroupsToProfile as addGroupsToProfileInStorage,
   removeGroupFromProfile as removeGroupFromProfileInStorage
 } from '../../data/data-manager.js';
 
@@ -113,6 +114,21 @@ class ProfileManager {
     if (!targetProfile) return;
     
     await addGroupToProfileInStorage(groupUuid, targetProfile);
+    await this.reload();
+  }
+
+  /**
+   * Add multiple groups to a profile in a single storage operation.
+   * Much faster than calling addGroup in a loop.
+   * @param {Array<string>} groupUuids - Array of group UUIDs
+   * @param {string} profileUuid - UUID of profile (uses active if not provided)
+   */
+  async addGroups(groupUuids, profileUuid = null) {
+    if (!groupUuids.length) return;
+    const targetProfile = profileUuid || this.activeProfileUuid;
+    if (!targetProfile) return;
+    
+    await addGroupsToProfileInStorage(groupUuids, targetProfile);
     await this.reload();
   }
 
