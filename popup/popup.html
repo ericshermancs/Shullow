@@ -6,6 +6,9 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body class="industrial-theme">
+  <!-- Theme transition overlay for smooth mode switching -->
+  <div id="theme-transition-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: transparent; pointer-events: none; z-index: 999; transition: background-color 0.2s ease;"></div>
+  
   <header>
     <div class="logo-container">
       <button id="profile-menu-btn" class="profile-menu-btn" title="Switch profiles">

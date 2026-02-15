@@ -518,8 +518,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateStatus('SYSTEM READY');
 
   // --- Listeners ---
-  nightModeToggle.addEventListener('click', () => {
+  nightModeToggle.addEventListener('click', async () => {
     preferences.nightMode = !preferences.nightMode;
+    
+    // Prevent double-clicking during animation
+    nightModeToggle.disabled = true;
+    
+    const overlay = document.getElementById('theme-transition-overlay');
+    
+    // Fade in overlay (100ms)
+    overlay.style.display = 'block';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
+    overlay.style.transition = 'background-color 0.1s cubic-bezier(0.4, 0, 0.2, 1)';
+    overlay.offsetHeight;
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.35)';
+    await new Promise(resolve => setTimeout(resolve, 80));
+    // Swap theme at 80ms
     if (preferences.nightMode) {
       document.body.classList.add('night-mode');
       nightModeIcon.textContent = '☀️';
@@ -527,6 +541,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.body.classList.remove('night-mode');
       nightModeIcon.textContent = '🌙';
     }
+    // Fade out overlay (100ms)
+    overlay.style.transition = 'background-color 0.1s cubic-bezier(0.4, 0, 0.2, 1)';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
+    await new Promise(resolve => setTimeout(resolve, 80));
+    overlay.style.display = 'none';
+    nightModeToggle.disabled = false;
     saveData();
   });
 
