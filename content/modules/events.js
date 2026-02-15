@@ -25,17 +25,27 @@
   // ─── 1. Chrome Runtime Messages (from Popup) ────────────────────────
   chrome.runtime.onMessage.addListener((msg, sender, resp) => {
     if (msg.action === 'update-active-groups' || msg.action === 'refresh-pois') {
+      console.log(`[CONTENT EVENTS] Received message:`, msg.action, `activeGroups:`, msg.activeGroups);
       const state = getState();
       if (!state) {
+        console.log(`[CONTENT EVENTS] No state found, returning no-state`);
         resp({ status: 'no-state' });
         return true;
       }
 
-      if (msg.activeGroups) state.activeGroups = msg.activeGroups;
+      if (msg.activeGroups) {
+        console.log(`[CONTENT EVENTS] Updating state.activeGroups from:`, state.activeGroups, `to:`, msg.activeGroups);
+        state.activeGroups = msg.activeGroups;
+      }
       if (msg.preferences) state.preferences = msg.preferences;
       lastMessageUpdate = Date.now();
       state._skipStorageRead = true;
       if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+
+      // Always clear POI cache when preferences (including groupStyles) change
+      // This ensures new group toggles use the latest styles
+      state._poiCache = null;
+      state._poiCacheTime = 0;
 
       const styleChanged = !!(msg.preferences && msg.preferences.groupStyles);
       const styleChangedGroup = msg.styleChangedGroup || null;
@@ -54,7 +64,11 @@
           resp({ status: 'ok' });
         });
       } else {
-        state.refresh().then(() => resp({ status: 'ok' }));
+        console.log(`[CONTENT EVENTS] Calling refresh() with activeGroups:`, state.activeGroups);
+        state.refresh().then(() => {
+          console.log(`[CONTENT EVENTS] refresh() completed`);
+          resp({ status: 'ok' });
+        });
       }
       return true;
     }
@@ -62,7 +76,13 @@
     if (msg.action === 'toggle-site-enabled') {
       const state = getState();
       if (state) {
+        // Update preferences if provided
         if (msg.preferences) state.preferences = msg.preferences;
+        // Update activeGroups if provided
+        if (msg.activeGroups) state.activeGroups = msg.activeGroups;
+        // Clear POI cache so re-enable reads fresh group data
+        state._poiCache = null;
+        state._poiCacheTime = 0;
         state._skipStorageRead = false; // Force storage read to get latest siteEnabled
 
         // If extension was dormant (page loaded with site OFF), boot it now
@@ -110,6 +130,12 @@
         }
       }
 
+      // If groupStyles changed, invalidate POI cache so icons are re-rendered
+      if (changes.preferences.newValue?.groupStyles) {
+        state._poiCache = null;
+        state._poiCacheTime = 0;
+      }
+
       if (window.manager && !skipRefresh) {
         window.manager.updateVisibility();
         window.manager.render();
@@ -129,6 +155,20 @@
 
     if (changes.poiGroups) {
       // Invalidate cache so renames/deletes are reflected immediately
+      state._poiCache = null;
+      state._poiCacheTime = 0;
+
+      if (!skipRefresh) {
+        if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+        storageRefreshTimer = setTimeout(() => {
+          storageRefreshTimer = null;
+          state.refresh();
+        }, 50);
+      }
+    }
+
+    if (changes.profiles) {
+      // Profile data changed (groups imported/deleted/modified)
       state._poiCache = null;
       state._poiCacheTime = 0;
 
