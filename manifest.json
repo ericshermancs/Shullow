@@ -37,10 +37,10 @@
     "default_popup": "popup/popup.html"
   },
   "icons": {
-    "16": "docs/images/icons/logo.png",
-    "32": "docs/images/icons/logo.png",
-    "48": "docs/images/icons/logo.png",
-    "128": "docs/images/icons/logo.png"
+    "16": "icons/logo.png",
+    "32": "icons/logo.png",
+    "48": "icons/logo.png",
+    "128": "icons/logo.png"
   },
   "web_accessible_resources": [
     {

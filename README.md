@@ -121,19 +121,19 @@ This produces the same result as the multi-group CSV example: three automaticall
 Experience Shullow across different real estate platforms:
 
 #### Zillow - Columbus Area with GoDaven POI Data
-![Zillow Markers - Columbus](docs/images/examples/ZillowColumbusGoDaven.png)
+![Zillow Markers - Columbus](examples/ZillowColumbusGoDaven.png)
 *Custom Shullow POI markers with custom pop-up information from your CSV files*
 
 #### Homes.com - Flushing with Shullow Overlay
-![Homes.com Overlay](docs/images/examples/HomesFlushingShullowOverlayExample.png)
+![Homes.com Overlay](examples/HomesFlushingShullowOverlayExample.png)
 *Shullow extension plugin menu. Control the plugin theme, add groups, rename them, customize them!*
 
 #### Realtor.com - US Young Israel Listing
-![Realtor.com Integration](docs/images/examples/RealtorScreenshotUSYoungIsrael.png)
+![Realtor.com Integration](examples/RealtorScreenshotUSYoungIsrael.png)
 *Custom icons for your Shullow POI groups so you can distinguish between them easily at any zoom level*
 
 #### Airbnb - Cancun with GoDaven Data
-![Airbnb Markers - Cancun](docs/images/examples/AirbnbCancunGoDaven.png)
+![Airbnb Markers - Cancun](examples/AirbnbCancunGoDaven.png)
 *Demonstrating generic map support extending beyond real estate sites, like if you need to find an AirBNB in Cancun within walking distance to a minyan on Shabbat*
 
 
