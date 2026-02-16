@@ -2,7 +2,7 @@ name: Build and Package Extension
 
 on:
   release:
-    types: [created, published]
+    types: [published]
 
 jobs:
   build:
