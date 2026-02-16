@@ -28,7 +28,7 @@ jobs:
       - name: Package extension as ZIP
         run: |
           mkdir dist
-          powershell Compress-Archive -Path manifest.json,background,bridge,content,data,options,overlay,overlays,popup -DestinationPath dist\shullow-${{ github.event.release.tag_name }}.zip
+          powershell Compress-Archive -Path manifest.json,background,bridge,content,data,options,overlay,overlays,popup,icons -DestinationPath dist\shullow-${{ github.event.release.tag_name }}.zip
 
       - name: Package extension as CRX
         run: |
