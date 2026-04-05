@@ -950,11 +950,12 @@ export async function updateGroupPOIs(profileUuid, groupUuid, newPois, syncMeta 
 
 /**
  * Fetches a remote CSV/JSON URL, parses it, and imports it.
- * Handles both export format (array of groups) and raw POI data (CSV/JSON).
+ * For export format, updates existing groups from this URL and creates new ones as needed (no duplicates).
+ * For raw POI data, creates a single new group.
  *
  * @param {string} url        - The remote URL to fetch
  * @param {string} groupName  - Display name for the new group (used only if not export format)
- * @returns {Promise<{imported: number, urls: string[]}>}  imported group count and their UUIDs
+ * @returns {Promise<{imported: number, urls: string[]}>}  count of imported/updated groups
  */
 export async function saveGroupFromUrl(url, groupName) {
   // Fetch
@@ -982,34 +983,93 @@ export async function saveGroupFromUrl(url, groupName) {
     jsonData = null;
   }
 
-  let imported;
   if (isExportFormat) {
-    // Handle export format: parse and import all groups
-    imported = await importGroupsData(jsonData, false);
-    
-    // Patch all imported groups with sourceUrl + sync metadata
+    // Handle export format: intelligently merge/update groups to avoid duplicates
     const now = Date.now();
     const storageData = await chrome.storage.local.get(['profiles', 'activeProfile']);
     const profiles = storageData.profiles || {};
     const activeProfileUuid = storageData.activeProfile;
     const activeProfile = profiles[activeProfileUuid];
 
-    if (activeProfile?.groups) {
-      for (const { groupUuid } of imported) {
-        if (activeProfile.groups[groupUuid]) {
-          activeProfile.groups[groupUuid].sourceUrl = url;
-          activeProfile.groups[groupUuid].syncEnabled = false;
-          activeProfile.groups[groupUuid].lastSynced = now;
-          activeProfile.groups[groupUuid].lastSyncStatus = 'success';
-          activeProfile.groups[groupUuid].lastSyncError = null;
-          activeProfile.groups[groupUuid].contentHash = contentHash;
-        }
+    if (!activeProfile?.groups) {
+      throw new Error('No active profile found');
+    }
+
+    // Build map of groups from this URL by name for deduplication
+    const existingFromUrl = {};
+    for (const [uuid, group] of Object.entries(activeProfile.groups)) {
+      if (group.sourceUrl === url) {
+        existingFromUrl[group.name] = uuid;
       }
+    }
+
+    let processedCount = 0;
+
+    // Process each group in the export file
+    for (const fileGroup of jsonData) {
+      if (!fileGroup.name || !fileGroup.data) continue;
+
+      try {
+        const pois = parseCSV(fileGroup.data);
+        if (pois.length === 0) continue;
+
+        const groupName = fileGroup.name;
+
+        // Check if a group from this URL with this name already exists
+        if (existingFromUrl[groupName]) {
+          // Update existing group's POIs and metadata
+          const existingUuid = existingFromUrl[groupName];
+          activeProfile.groups[existingUuid].pois = pois;
+          activeProfile.groups[existingUuid].lastSynced = now;
+          activeProfile.groups[existingUuid].lastSyncStatus = 'success';
+          activeProfile.groups[existingUuid].lastSyncError = null;
+          activeProfile.groups[existingUuid].contentHash = contentHash;
+          // Preserve other fields like syncEnabled
+          processedCount++;
+        } else {
+          // Create new group
+          const newUuid = generateUUID();
+          activeProfile.groups[newUuid] = {
+            uuid: newUuid,
+            name: groupName,
+            pois: pois,
+            sourceUrl: url,
+            syncEnabled: false,
+            lastSynced: now,
+            lastSyncStatus: 'success',
+            lastSyncError: null,
+            contentHash: contentHash
+          };
+
+          // Add styles
+          if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+          activeProfile.groupStyles[newUuid] = {
+            color: fileGroup.colors?.primary || '#d1ff00',
+            secondaryColor: fileGroup.colors?.secondary || '#ffffff',
+            logoData: fileGroup.icon && fileGroup.icon.length < 50000 ? fileGroup.icon : null
+          };
+
+          // Track in UUIDs list
+          if (!activeProfile.groupUuids) activeProfile.groupUuids = [];
+          if (!activeProfile.groupUuids.includes(newUuid)) {
+            activeProfile.groupUuids.push(newUuid);
+          }
+
+          existingFromUrl[groupName] = newUuid;
+          processedCount++;
+        }
+      } catch (groupError) {
+        console.error(`Failed to process group "${fileGroup.name}":`, groupError);
+      }
+    }
+
+    // Single storage write for all changes
+    if (processedCount > 0) {
       profiles[activeProfileUuid] = activeProfile;
       await chrome.storage.local.set({ profiles });
     }
 
-    return { imported: imported.length, urls: [url] };
+    return { imported: processedCount, urls: [url] };
   } else {
     // Handle raw POI data (CSV or JSON)
     let pois;
