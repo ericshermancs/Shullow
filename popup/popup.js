@@ -1,4 +1,4 @@
-import { loadPOIGroups, savePOIs, savePOIsBatch, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData, deleteAllGroupsFromProfile } from '../data/data-manager.js';
+import { loadPOIGroups, savePOIs, savePOIsBatch, importData, deletePOIGroup, renamePOIGroup, exportGroupsData, importGroupsData, deleteAllGroupsFromProfile, saveGroupFromUrl, updateGroupPOIs } from '../data/data-manager.js';
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
 import { profileManager } from './modules/profile-manager.js';
@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const hostnameDisplay = document.getElementById('current-hostname');
   const newGroupNameInput = document.getElementById('new-group-name');
   const csvUploadInput = document.getElementById('csv-upload');
+  const uploadBtn = document.getElementById('upload-btn');
   const exportBtn = document.getElementById('export-btn');
   const disableAllBtn = document.getElementById('disable-all-btn');
   const clearAllBtn = document.getElementById('clear-all-btn');
@@ -465,10 +466,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         const icon = style.logoData ? `<img src="${style.logoData}" class="pin-icon">` : PIN_SVG(style.color, style.secondaryColor || '#ffffff');
         const item = document.createElement('div');
         item.className = 'group-item';
+
+        // Build optional sync icons for URL-backed groups
+        let syncIcons = '';
+        if (group.sourceUrl) {
+          const lastSyncedText = group.lastSynced
+            ? (() => { const mins = Math.round((Date.now() - group.lastSynced) / 60000); return mins < 2 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()
+            : 'never';
+          const urlShort = group.sourceUrl.length > 50 ? group.sourceUrl.slice(0, 47) + '…' : group.sourceUrl;
+          const statusIndicator = group.lastSyncStatus === 'error' ? '❌' : '✓';
+          syncIcons = `
+            <a class="link-icon" href="${group.sourceUrl}" target="_blank" title="${group.sourceUrl}" data-uuid="${uuid}">↗</a>
+            <div class="sync-icon-wrapper" data-uuid="${uuid}">
+              <button class="sync-icon" data-uuid="${uuid}" data-profile-uuid="${profileManager.getActive()?.uuid || ''}" title="Click to sync now">↻</button>
+              <div class="sync-popover">
+                <div class="sync-popover-header">
+                  <span class="sync-status-indicator">${statusIndicator}</span>
+                  <span class="sync-last-time">Synced ${lastSyncedText.toUpperCase()}</span>
+                </div>
+                <label class="sync-popover-toggle">
+                  <input type="checkbox" class="autosync-toggle" data-uuid="${uuid}" ${group.syncEnabled ? 'checked' : ''}>
+                  <span>Auto-sync daily</span>
+                </label>
+                ${group.lastSyncError ? `<div class="sync-error-msg">${group.lastSyncError}</div>` : ''}
+                <button class="desync-btn" data-uuid="${uuid}">⊗ De-sync (keep local)</button>
+              </div>
+            </div>
+          `;
+        }
+
         item.innerHTML = `
           <div class="pin-preview" data-uuid="${uuid}" data-name="${group.name}">${icon}</div>
           <span class="group-name" data-uuid="${uuid}">${group.name}</span>
           <div class="group-actions">
+            ${syncIcons}
             <button class="delete-btn" data-uuid="${uuid}" data-name="${group.name}">&times;</button>
             <label class="switch">
               <input type="checkbox" class="group-toggle" data-uuid="${uuid}" ${isActive ? 'checked' : ''}>
@@ -637,17 +668,173 @@ document.addEventListener('DOMContentLoaded', async () => {
   groupsContainer.addEventListener('change', async (e) => {
     if (e.target.classList.contains('group-toggle')) {
       activeGroups[e.target.dataset.uuid] = e.target.checked;
-      
+
       // Ensure preferences.groupStyles reflects the active profile's groupStyles
       const activeProfile = profileManager.getActive();
       if (activeProfile && activeProfile.groupStyles) {
         preferences.groupStyles = { ...activeProfile.groupStyles };
       }
-      
+
       await saveData();
       updateDisableAllButton();
     }
+
+    if (e.target.classList.contains('autosync-toggle')) {
+      const groupUuid = e.target.dataset.uuid;
+      const enabled = e.target.checked;
+      const storageRead = await chrome.storage.local.get(['profiles', 'activeProfile']);
+      const profiles = storageRead.profiles || {};
+      const ap = profiles[storageRead.activeProfile];
+      if (ap?.groups?.[groupUuid]) {
+        const sourceUrl = ap.groups[groupUuid].sourceUrl;
+        // Update syncEnabled on this group and all siblings sharing the same sourceUrl
+        let dirty = false;
+        for (const [uuid, g] of Object.entries(ap.groups || {})) {
+          if (g.sourceUrl === sourceUrl) {
+            g.syncEnabled = enabled;
+            dirty = true;
+          }
+        }
+        if (dirty) {
+          profiles[storageRead.activeProfile] = ap;
+          await chrome.storage.local.set({ profiles });
+          await renderGroups();
+        }
+      }
+    }
   });
+
+  // Sync popover is shown/hidden via CSS :hover on .sync-icon-wrapper (no JS needed)
+
+  groupsContainer.addEventListener('click', async (e) => {
+    // --- De-sync button ---
+    const desyncBtn = e.target.closest('.desync-btn');
+    if (desyncBtn) {
+      const groupUuid = desyncBtn.dataset.uuid;
+      const sd = await chrome.storage.local.get(['profiles', 'activeProfile']);
+      const profs = sd.profiles || {};
+      const ap = profs[sd.activeProfile];
+      if (ap?.groups?.[groupUuid]) {
+        const g = ap.groups[groupUuid];
+        delete g.sourceUrl;
+        delete g.syncEnabled;
+        delete g.lastSynced;
+        delete g.lastSyncStatus;
+        delete g.lastSyncError;
+        delete g.contentHash;
+        profs[sd.activeProfile] = ap;
+        await chrome.storage.local.set({ profiles: profs });
+        await profileManager.reload();
+        await renderGroups();
+        updateStatus('DE-SYNCED: GROUP IS NOW LOCAL');
+      }
+      return;
+    }
+
+    // --- Manual sync button ---
+    const syncBtn = e.target.closest('.sync-icon');
+    if (!syncBtn) return;
+    const groupUuid = syncBtn.dataset.uuid;
+    const profileUuid = syncBtn.dataset.profileUuid;
+    syncBtn.textContent = '…';
+    syncBtn.disabled = true;
+    updateStatus('SYNCING...');
+    try {
+      const result = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: 'manual-sync-group', profileUuid, groupUuid },
+          (response) => {
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+            if (response?.status === 'error') return reject(new Error(response.error));
+            resolve(response);
+          }
+        );
+      });
+      const changed = result.changed ? ` (${result.poiCount} POIs)` : ' (no change)';
+      updateStatus(`SYNCED${changed}`);
+      // Stamp lastSynced on all sibling groups sharing the same sourceUrl (before re-render)
+      const sd = await chrome.storage.local.get(['profiles', 'activeProfile']);
+      const profs = sd.profiles || {};
+      const ap = profs[sd.activeProfile];
+      const syncedGroup = ap?.groups?.[groupUuid];
+      if (syncedGroup?.sourceUrl && ap) {
+        let dirty = false;
+        for (const [uid, g] of Object.entries(ap.groups || {})) {
+          if (uid !== groupUuid && g.sourceUrl === syncedGroup.sourceUrl) {
+            g.lastSynced = result.lastSynced;
+            g.lastSyncStatus = result.lastSyncStatus;
+            g.lastSyncError = result.lastSyncError || null;
+            dirty = true;
+          }
+        }
+        if (dirty) {
+          profs[sd.activeProfile] = ap;
+          await chrome.storage.local.set({ profiles: profs });
+        }
+      }
+      await profileManager.reload();
+      await renderGroups();
+    } catch (err) {
+      console.error('[Sync] Manual sync failed:', err);
+      updateStatus(`SYNC FAILED: ${err.message}`);
+      syncBtn.textContent = '↻';
+      syncBtn.disabled = false;
+    }
+  });
+
+  // UPLOAD button handler: detect URL vs file upload
+  uploadBtn.onclick = async () => {
+    const input = newGroupNameInput.value.trim();
+    
+    // Detect if it looks like a URL (http:// or https://)
+    let isUrl = false;
+    if (input.toLowerCase().startsWith('http://') || input.toLowerCase().startsWith('https://')) {
+      try {
+        new URL(input);
+        isUrl = true;
+      } catch (e) {
+        isUrl = false;
+      }
+    }
+
+    if (isUrl) {
+      // Handle URL import
+      const defaultGroupName = input.split('/').pop().replace(/\.[^/.]+$/, '') || 'Remote Dataset';
+      uploadBtn.textContent = '…';
+      uploadBtn.disabled = true;
+      updateStatus('FETCHING...');
+      try {
+        const { imported, urls } = await saveGroupFromUrl(input, defaultGroupName);
+        // Add all imported groups to activeGroups (handled by the save function)
+        const allProfiles = await chrome.storage.local.get(['profiles', 'activeProfile']);
+        const freshActiveProfile = (allProfiles.profiles || {})[allProfiles.activeProfile];
+        if (freshActiveProfile?.groupStyles) {
+          preferences.groupStyles = { ...freshActiveProfile.groupStyles };
+        }
+        if (freshActiveProfile?.groups) {
+          for (const [uuid, group] of Object.entries(freshActiveProfile.groups)) {
+            if (group.sourceUrl === input) {
+              activeGroups[uuid] = true;
+            }
+          }
+        }
+        await profileManager.reload();
+        await saveData();
+        newGroupNameInput.value = '';
+        await renderGroups();
+        updateStatus(`IMPORTED ${imported} GROUP${imported !== 1 ? 'S' : ''} FROM URL`);
+      } catch (err) {
+        console.error('[URL Import] Failed:', err);
+        updateStatus(`FETCH FAILED: ${err.message.slice(0, 40)}`);
+      } finally {
+        uploadBtn.textContent = 'UPLOAD';
+        uploadBtn.disabled = false;
+      }
+    } else {
+      // Handle file upload: trigger file picker (regardless of input)
+      csvUploadInput.click();
+    }
+  };
 
   csvUploadInput.onchange = async (e) => {
     const file = e.target.files[0];
