@@ -5,8 +5,13 @@
   "description": "Injects POI markers onto real estate map websites",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "alarms"
   ],
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

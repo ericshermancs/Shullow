@@ -900,3 +900,217 @@ export async function deleteAllGroupsFromProfile(profileUuid, useSyncStorage = f
     return [];
   }
 }
+
+// ============================================
+// REMOTE URL SYNC
+// ============================================
+
+/**
+ * Fast non-cryptographic djb2 hash for content change detection.
+ * @param {string} text
+ * @returns {string}
+ */
+function computeSimpleHash(text) {
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 33) ^ text.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Updates a group's POIs and/or sync metadata in storage (single read+write).
+ * Called by the background service worker after a successful or failed sync.
+ *
+ * @param {string} profileUuid
+ * @param {string} groupUuid
+ * @param {Array|null} newPois - New POIs array. Pass null to leave pois untouched.
+ * @param {object} syncMeta  - Fields to merge onto the group: lastSynced, lastSyncStatus,
+ *                             lastSyncError, contentHash
+ */
+export async function updateGroupPOIs(profileUuid, groupUuid, newPois, syncMeta = {}) {
+  const storage = chrome.storage.local;
+  const data = await storage.get(['profiles']);
+  const profiles = data.profiles || {};
+  const profile = profiles[profileUuid];
+
+  if (!profile || !profile.groups?.[groupUuid]) {
+    throw new Error(`Group ${groupUuid} not found in profile ${profileUuid}`);
+  }
+
+  const group = profile.groups[groupUuid];
+  if (newPois !== null) {
+    group.pois = newPois;
+  }
+  Object.assign(group, syncMeta);
+
+  profiles[profileUuid] = profile;
+  await storage.set({ profiles });
+}
+
+/**
+ * Fetches a remote CSV/JSON URL, parses it, and imports it.
+ * For export format, updates existing groups from this URL and creates new ones as needed (no duplicates).
+ * For raw POI data, creates a single new group.
+ *
+ * @param {string} url        - The remote URL to fetch
+ * @param {string} groupName  - Display name for the new group (used only if not export format)
+ * @returns {Promise<{imported: number, urls: string[]}>}  count of imported/updated groups
+ */
+export async function saveGroupFromUrl(url, groupName) {
+  // Fetch
+  let text;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    text = await response.text();
+  } catch (err) {
+    throw new Error(`Failed to fetch URL: ${err.message}`);
+  }
+
+  const contentHash = computeSimpleHash(text);
+
+  // Try to parse as JSON first to detect export format
+  let jsonData;
+  let isExportFormat = false;
+  try {
+    jsonData = JSON.parse(text);
+    // Check if it's our export format (array with name, icon, colors, data)
+    if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0].data && jsonData[0].name) {
+      isExportFormat = true;
+    }
+  } catch (e) {
+    jsonData = null;
+  }
+
+  if (isExportFormat) {
+    // Handle export format: intelligently merge/update groups to avoid duplicates
+    const now = Date.now();
+    const storageData = await chrome.storage.local.get(['profiles', 'activeProfile']);
+    const profiles = storageData.profiles || {};
+    const activeProfileUuid = storageData.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+
+    if (!activeProfile?.groups) {
+      throw new Error('No active profile found');
+    }
+
+    // Build map of groups from this URL by name for deduplication
+    const existingFromUrl = {};
+    for (const [uuid, group] of Object.entries(activeProfile.groups)) {
+      if (group.sourceUrl === url) {
+        existingFromUrl[group.name] = uuid;
+      }
+    }
+
+    let processedCount = 0;
+
+    // Process each group in the export file
+    for (const fileGroup of jsonData) {
+      if (!fileGroup.name || !fileGroup.data) continue;
+
+      try {
+        const pois = parseCSV(fileGroup.data);
+        if (pois.length === 0) continue;
+
+        const groupName = fileGroup.name;
+
+        // Check if a group from this URL with this name already exists
+        if (existingFromUrl[groupName]) {
+          // Update existing group's POIs and metadata
+          const existingUuid = existingFromUrl[groupName];
+          activeProfile.groups[existingUuid].pois = pois;
+          activeProfile.groups[existingUuid].lastSynced = now;
+          activeProfile.groups[existingUuid].lastSyncStatus = 'success';
+          activeProfile.groups[existingUuid].lastSyncError = null;
+          activeProfile.groups[existingUuid].contentHash = contentHash;
+          // Preserve other fields like syncEnabled
+          processedCount++;
+        } else {
+          // Create new group
+          const newUuid = generateUUID();
+          activeProfile.groups[newUuid] = {
+            uuid: newUuid,
+            name: groupName,
+            pois: pois,
+            sourceUrl: url,
+            syncEnabled: false,
+            lastSynced: now,
+            lastSyncStatus: 'success',
+            lastSyncError: null,
+            contentHash: contentHash
+          };
+
+          // Add styles
+          if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+          activeProfile.groupStyles[newUuid] = {
+            color: fileGroup.colors?.primary || '#d1ff00',
+            secondaryColor: fileGroup.colors?.secondary || '#ffffff',
+            logoData: fileGroup.icon && fileGroup.icon.length < 50000 ? fileGroup.icon : null
+          };
+
+          // Track in UUIDs list
+          if (!activeProfile.groupUuids) activeProfile.groupUuids = [];
+          if (!activeProfile.groupUuids.includes(newUuid)) {
+            activeProfile.groupUuids.push(newUuid);
+          }
+
+          existingFromUrl[groupName] = newUuid;
+          processedCount++;
+        }
+      } catch (groupError) {
+        console.error(`Failed to process group "${fileGroup.name}":`, groupError);
+      }
+    }
+
+    // Single storage write for all changes
+    if (processedCount > 0) {
+      profiles[activeProfileUuid] = activeProfile;
+      await chrome.storage.local.set({ profiles });
+    }
+
+    return { imported: processedCount, urls: [url] };
+  } else {
+    // Handle raw POI data (CSV or JSON)
+    let pois;
+    try {
+      const trimmed = text.trimStart();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        pois = parseJSON(text);
+      } else {
+        pois = parseCSV(text);
+      }
+    } catch (parseErr) {
+      throw new Error(`Failed to parse response: ${parseErr.message}`);
+    }
+
+    if (!pois || pois.length === 0) {
+      throw new Error('No POIs found in the response');
+    }
+
+    // Save as a new group (single read+write via savePOIsBatch)
+    const createdUuids = await savePOIsBatch([{ pois, groupName }]);
+    const uuid = createdUuids[0];
+    if (!uuid) throw new Error('Failed to create group');
+
+    // Patch the group to add URL metadata (single read+write)
+    const now = Date.now();
+    const storageData = await chrome.storage.local.get(['profiles', 'activeProfile']);
+    const profiles = storageData.profiles || {};
+    const activeProfileUuid = storageData.activeProfile;
+    const activeProfile = profiles[activeProfileUuid];
+
+    if (activeProfile?.groups?.[uuid]) {
+      activeProfile.groups[uuid].sourceUrl = url;
+      activeProfile.groups[uuid].syncEnabled = false;
+      activeProfile.groups[uuid].lastSynced = now;
+      activeProfile.groups[uuid].lastSyncStatus = 'success';
+      activeProfile.groups[uuid].lastSyncError = null;
+      activeProfile.groups[uuid].contentHash = contentHash;
+      profiles[activeProfileUuid] = activeProfile;
+      await chrome.storage.local.set({ profiles });
+    }
+
+    return { imported: 1, urls: [url] };
+  }
+}
