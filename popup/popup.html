@@ -21,59 +21,95 @@
     </div>
   </header>
 
+  <nav class="tabs-nav">
+    <button class="tab-btn active" id="tab-btn-groups" data-tab="groups">GROUPS</button>
+    <button class="tab-btn" id="tab-btn-library" data-tab="library">LIBRARY</button>
+  </nav>
+
   <main>
-    <section class="controls">
-      <div class="control-item site-toggle">
-        <div class="site-info">
-          <span class="control-label">OVERLAY FOR SITE</span>
-          <span id="current-hostname" class="hostname-display">detecting...</span>
+    <!-- GROUPS TAB -->
+    <div id="tab-groups" class="tab-pane active">
+      <section class="controls">
+        <div class="control-item site-toggle">
+          <div class="site-info">
+            <span class="control-label">OVERLAY FOR SITE</span>
+            <span id="current-hostname" class="hostname-display">detecting...</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="overlay-toggle">
+            <span class="slider"></span>
+          </label>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="overlay-toggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="control-item">
-        <span class="control-label">GLOBAL DEBUG</span>
-        <label class="switch">
-          <input type="checkbox" id="debug-toggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-    </section>
-
-    <section class="add-group">
-      <div class="section-header">
-        <h2>NEW GROUP</h2>
-      </div>
-      <div class="input-row">
-        <input type="text" id="new-group-name" placeholder="GROUP NAME / URL / FILE PATH">
-        <div class="file-input-wrapper">
-          <input type="file" id="csv-upload" accept=".csv,.json" style="display: none;">
-          <button id="upload-btn" class="btn-primary" style="font-size: 0.6rem;">UPLOAD</button>
+        <div class="control-item">
+          <span class="control-label">GLOBAL DEBUG</span>
+          <label class="switch">
+            <input type="checkbox" id="debug-toggle">
+            <span class="slider"></span>
+          </label>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="groups">
-      <div class="section-header">
-        <div class="groups-header-wrapper">
-          <h2>GROUPS</h2>
-          <div class="group-actions-menu">
-            <button class="action-btn" id="disable-all-btn" title="Disable all groups">DISABLE ALL</button>
-            <button class="action-btn danger" id="clear-all-btn" title="Clear all groups">CLEAR</button>
+      <section class="add-group">
+        <div class="section-header">
+          <h2>NEW GROUP</h2>
+        </div>
+        <div class="input-row">
+          <input type="text" id="new-group-name" placeholder="GROUP NAME / URL / FILE PATH">
+          <div class="file-input-wrapper">
+            <input type="file" id="csv-upload" accept=".csv,.json" style="display: none;">
+            <button id="upload-btn" class="btn-primary" style="font-size: 0.6rem;">UPLOAD</button>
           </div>
         </div>
-        <div class="count-export-wrapper">
-          <span class="count" id="group-count">0</span>
-          <button class="export-btn" id="export-btn" title="Export all groups. Export file can be uploaded using the upload button above.">EXPORT</button>
+      </section>
+
+      <section class="groups">
+        <div class="section-header">
+          <div class="groups-header-wrapper">
+            <h2>GROUPS</h2>
+            <div class="group-actions-menu">
+              <button class="action-btn" id="disable-all-btn" title="Disable all groups">DISABLE ALL</button>
+              <button class="action-btn danger" id="clear-all-btn" title="Clear all groups">CLEAR</button>
+            </div>
+          </div>
+          <div class="count-export-wrapper">
+            <span class="count" id="group-count">0</span>
+            <button class="export-btn" id="export-btn" title="Export all groups. Export file can be uploaded using the upload button above.">EXPORT</button>
+          </div>
         </div>
-      </div>
-      <div id="groups-container" class="groups-list">
-        <!-- Dynamically populated -->
-        <div class="empty-state">NO GROUPS FOUND</div>
-      </div>
-    </section>
+        <div id="groups-container" class="groups-list">
+          <!-- Dynamically populated -->
+          <div class="empty-state">NO GROUPS FOUND</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- LIBRARY TAB -->
+    <div id="tab-library" class="tab-pane" style="display: none;">
+      <section class="library">
+        <div class="section-header">
+          <div class="library-header-wrapper">
+            <h2>DATASETS</h2>
+            <button class="action-btn" id="library-refresh-btn" title="Refresh marketplace index">↻ REFRESH</button>
+          </div>
+          <div class="library-count-wrapper">
+            <span class="count" id="library-count">0</span>
+          </div>
+        </div>
+
+        <div class="library-search-box">
+          <input type="text" id="library-search-input" placeholder="SEARCH DATASETS / TAGS...">
+        </div>
+
+        <div class="category-pills" id="library-category-pills">
+          <!-- Dynamically populated -->
+        </div>
+
+        <div id="library-container" class="library-list">
+          <!-- Dynamically populated -->
+          <div class="empty-state">LOADING MARKETPLACE...</div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <footer class="footer-bar">

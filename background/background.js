@@ -23,6 +23,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'shullow-daily-sync') {
     runAutoSync();
+    refreshMarketplaceIndexInBackground();
   }
 });
 
@@ -273,3 +274,27 @@ function generateUUID() {
     return v.toString(16);
   });
 }
+
+/**
+ * Background auto-refresh of marketplace catalog
+ */
+async function refreshMarketplaceIndexInBackground() {
+  try {
+    const DEFAULT_INDEX_URL = 'https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/index.json';
+    const storage = await chrome.storage.local.get(['marketplaceCache', 'preferences']);
+    const targetUrl = storage.preferences?.marketplaceUrl || DEFAULT_INDEX_URL;
+    const resp = await fetch(targetUrl, { cache: 'no-cache' });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && Array.isArray(data.datasets)) {
+        await chrome.storage.local.set({
+          marketplaceCache: { data, lastFetched: Date.now() }
+        });
+        console.log('[Background] Marketplace index refreshed automatically');
+      }
+    }
+  } catch (err) {
+    console.warn('[Background] Marketplace auto-refresh skipped:', err.message);
+  }
+}
+

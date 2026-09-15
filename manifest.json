@@ -54,7 +54,8 @@
         "bridge/main.js",
         "bridge/bridge-bundle.js",
         "overlays/*.js",
-        "overlays/*.json"
+        "overlays/*.json",
+        "data/*.json"
       ],
       "matches": ["<all_urls>"]
     }

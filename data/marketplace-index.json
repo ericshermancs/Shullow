@@ -1,0 +1,245 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2026-09-15T04:05:32.419Z",
+  "title": "Shullow Community Dataset Marketplace",
+  "description": "Curated collection of individual POI datasets in Shullow export format (JSON containing CSV + logo info).",
+  "datasets": [
+    {
+      "id": "mta-stations",
+      "name": "MTA Railroad Stations",
+      "description": "Metro-North and LIRR commuter railroad stations across NY and CT with official MTA branding.",
+      "category": "Transit",
+      "author": "MTA / data.ny.gov",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/mta-stations.json",
+      "format": "json",
+      "poiCount": 238,
+      "colors": {
+        "primary": "#0039A6",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "mta",
+        "train",
+        "transit",
+        "subway",
+        "railroad",
+        "metro-north",
+        "lirr",
+        "commute",
+        "new york"
+      ]
+    },
+    {
+      "id": "godaven-minyanim",
+      "name": "GoDaven Synagogues & Minyanim",
+      "description": "Comprehensive database of orthodox synagogues, daily minyanim, and batei midrash with official logo icon.",
+      "category": "Religious",
+      "author": "GoDaven / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/godaven.json",
+      "format": "json",
+      "poiCount": 4705,
+      "colors": {
+        "primary": "#d1ff00",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "shul",
+        "synagogue",
+        "minyan",
+        "prayer",
+        "orthodox",
+        "godaven",
+        "davening"
+      ]
+    },
+    {
+      "id": "ou-synagogues",
+      "name": "OU Orthodox Synagogues",
+      "description": "Orthodox Union member synagogues and community congregations with official OU logo.",
+      "category": "Religious",
+      "author": "Orthodox Union / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/ou-shuls.json",
+      "format": "json",
+      "poiCount": 1853,
+      "colors": {
+        "primary": "#d1ff00",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "ou",
+        "orthodox",
+        "synagogue",
+        "shul",
+        "congregation",
+        "union"
+      ]
+    },
+    {
+      "id": "chabad-houses",
+      "name": "Chabad Houses Worldwide",
+      "description": "Chabad houses and community outreach centers across North America and worldwide with custom logo.",
+      "category": "Religious",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-houses.json",
+      "format": "json",
+      "poiCount": 2337,
+      "colors": {
+        "primary": "#ed3dbc",
+        "secondary": "#00ff08"
+      },
+      "tags": [
+        "chabad",
+        "center",
+        "community",
+        "lubavitch",
+        "hospitality",
+        "minyan"
+      ]
+    },
+    {
+      "id": "young-israel-synagogues",
+      "name": "Young Israel Synagogues (NCYI)",
+      "description": "National Council of Young Israel branches and affiliated community congregations with custom logo.",
+      "category": "Religious",
+      "author": "National Council of Young Israel",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/young-israel.json",
+      "format": "json",
+      "poiCount": 114,
+      "colors": {
+        "primary": "#d1ff00",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "young israel",
+        "ncyi",
+        "synagogue",
+        "shul",
+        "orthodox"
+      ]
+    },
+    {
+      "id": "chabad-synagogues",
+      "name": "Chabad Synagogues",
+      "description": "Dedicated Chabad community synagogues and permanent prayer halls.",
+      "category": "Religious",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-synagogues.json",
+      "format": "json",
+      "poiCount": 295,
+      "colors": {
+        "primary": "#d97706",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "chabad",
+        "synagogue",
+        "shul",
+        "minyan"
+      ]
+    },
+    {
+      "id": "chabad-community-centers",
+      "name": "Chabad Community Centers",
+      "description": "Community centers offering cultural programming, family events, and social services.",
+      "category": "Community",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-community-centers.json",
+      "format": "json",
+      "poiCount": 253,
+      "colors": {
+        "primary": "#8b5cf6",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "chabad",
+        "jcc",
+        "community",
+        "social",
+        "center"
+      ]
+    },
+    {
+      "id": "chabad-campus",
+      "name": "Chabad on Campus",
+      "description": "Chabad student centers serving colleges and universities across North America.",
+      "category": "Education",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-campus.json",
+      "format": "json",
+      "poiCount": 244,
+      "colors": {
+        "primary": "#06b6d4",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "campus",
+        "college",
+        "university",
+        "students",
+        "chabad"
+      ]
+    },
+    {
+      "id": "chabad-day-schools",
+      "name": "Chabad Day Schools & Yeshivot",
+      "description": "Elementary, middle, and high school Jewish day schools and yeshivot.",
+      "category": "Education",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-day-schools.json",
+      "format": "json",
+      "poiCount": 154,
+      "colors": {
+        "primary": "#ec4899",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "school",
+        "yeshiva",
+        "day school",
+        "education",
+        "chabad"
+      ]
+    },
+    {
+      "id": "chabad-preschools",
+      "name": "Chabad Preschools & Early Childhood",
+      "description": "Early childhood centers, nursery schools, and preschools.",
+      "category": "Education",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-preschools.json",
+      "format": "json",
+      "poiCount": 150,
+      "colors": {
+        "primary": "#f43f5e",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "preschool",
+        "early childhood",
+        "nursery",
+        "children",
+        "chabad"
+      ]
+    },
+    {
+      "id": "chabad-mikvaot",
+      "name": "Chabad Community Mikvaot",
+      "description": "Community ritual bath facilities with contact details.",
+      "category": "Community",
+      "author": "Chabad.org / Shullow Spiders",
+      "url": "https://raw.githubusercontent.com/ericshermancs/Shullow-Datasets/master/chabad-mikvaot.json",
+      "format": "json",
+      "poiCount": 88,
+      "colors": {
+        "primary": "#a855f7",
+        "secondary": "#ffffff"
+      },
+      "tags": [
+        "mikvah",
+        "tahara",
+        "community",
+        "ritual bath"
+      ]
+    }
+  ]
+}

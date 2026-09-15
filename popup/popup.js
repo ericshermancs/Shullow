@@ -2,6 +2,7 @@ import { loadPOIGroups, savePOIs, savePOIsBatch, importData, deletePOIGroup, ren
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
 import { profileManager } from './modules/profile-manager.js';
+import { fetchMarketplaceIndex, isDatasetInstalled, installDataset } from './modules/marketplace.js';
 
 const PIN_SVG = (color, secondary) => `
 <svg class="pin-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -42,6 +43,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   const exportBtn = document.getElementById('export-btn');
   const disableAllBtn = document.getElementById('disable-all-btn');
   const clearAllBtn = document.getElementById('clear-all-btn');
+
+  // Tab & Library DOM elements
+  const tabBtnGroups = document.getElementById('tab-btn-groups');
+  const tabBtnLibrary = document.getElementById('tab-btn-library');
+  const tabGroups = document.getElementById('tab-groups');
+  const tabLibrary = document.getElementById('tab-library');
+  const libraryContainer = document.getElementById('library-container');
+  const libraryCountEl = document.getElementById('library-count');
+  const libraryRefreshBtn = document.getElementById('library-refresh-btn');
+  const librarySearchInput = document.getElementById('library-search-input');
+  const libraryCategoryPills = document.getElementById('library-category-pills');
+
+  let currentTab = 'groups';
+  let marketplaceData = null;
+  let selectedCategory = 'ALL';
+  let librarySearchQuery = '';
 
   let preferences = {
     overlayEnabled: false,
@@ -510,7 +527,122 @@ document.addEventListener('DOMContentLoaded', async () => {
         groupsContainer.appendChild(item);
       });
       updateDisableAllButton();
+      if (tabLibrary && tabLibrary.style.display !== 'none') {
+        renderLibrary();
+      }
     } catch (e) { console.error('Render error', e); }
+  };
+
+  const renderLibrary = async () => {
+    if (!libraryContainer) return;
+
+    if (!marketplaceData) {
+      try {
+        libraryContainer.innerHTML = '<div class="empty-state">LOADING MARKETPLACE...</div>';
+        marketplaceData = await fetchMarketplaceIndex(false);
+      } catch (e) {
+        console.error('Failed to load marketplace index', e);
+        libraryContainer.innerHTML = '<div class="empty-state">FAILED TO LOAD MARKETPLACE</div>';
+        return;
+      }
+    }
+
+    const datasets = marketplaceData?.datasets || [];
+    const activeProfile = profileManager.getActive();
+
+    // Dynamically populate category pills if needed
+    if (libraryCategoryPills) {
+      const categories = ['ALL', ...new Set(datasets.map(d => d.category).filter(Boolean))];
+      const existingCats = Array.from(libraryCategoryPills.querySelectorAll('.category-pill')).map(p => p.dataset.category);
+      if (existingCats.join(',') !== categories.join(',')) {
+        libraryCategoryPills.innerHTML = '';
+        categories.forEach(cat => {
+          const btn = document.createElement('button');
+          btn.className = `category-pill ${cat === selectedCategory ? 'active' : ''}`;
+          btn.dataset.category = cat;
+          btn.textContent = cat.toUpperCase();
+          libraryCategoryPills.appendChild(btn);
+        });
+      }
+    }
+
+    // Filter datasets
+    const filtered = datasets.filter(ds => {
+      // Category filter
+      if (selectedCategory !== 'ALL' && ds.category?.toLowerCase() !== selectedCategory.toLowerCase()) {
+        return false;
+      }
+      // Search query
+      if (librarySearchQuery) {
+        const q = librarySearchQuery.toLowerCase();
+        const matchName = ds.name?.toLowerCase().includes(q);
+        const matchDesc = ds.description?.toLowerCase().includes(q);
+        const matchCat = ds.category?.toLowerCase().includes(q);
+        const matchAuthor = ds.author?.toLowerCase().includes(q);
+        const matchTags = ds.tags?.some(t => t.toLowerCase().includes(q));
+        if (!matchName && !matchDesc && !matchCat && !matchAuthor && !matchTags) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (libraryCountEl) {
+      libraryCountEl.textContent = filtered.length;
+    }
+
+    if (filtered.length === 0) {
+      libraryContainer.innerHTML = '<div class="empty-state">NO DATASETS FOUND</div>';
+      return;
+    }
+
+    libraryContainer.innerHTML = '';
+    filtered.forEach(ds => {
+      const isInstalled = isDatasetInstalled(ds, activeProfile);
+      const priColor = ds.colors?.primary || '#4a9eff';
+      const secColor = ds.colors?.secondary || '#ffffff';
+
+      const card = document.createElement('div');
+      card.className = 'library-card';
+      card.innerHTML = `
+        <div class="library-card-header">
+          <div class="library-card-title-area">
+            <div class="library-pin-preview">${PIN_SVG(priColor, secColor)}</div>
+            <div style="min-width: 0; flex: 1;">
+              <div class="library-card-title" title="${ds.name}">${ds.name}</div>
+              <div class="library-card-author">${ds.author || 'Community'}</div>
+            </div>
+          </div>
+          <button class="library-add-btn ${isInstalled ? 'installed' : ''}" data-dataset-id="${ds.id}" ${isInstalled ? 'disabled' : ''}>
+            ${isInstalled ? 'ADDED ✓' : '+ ADD'}
+          </button>
+        </div>
+        <p class="library-card-desc">${ds.description || ''}</p>
+        <div class="library-card-meta">
+          <div class="library-card-badges">
+            <span class="library-badge">${ds.category || 'General'}</span>
+            ${ds.format ? `<span class="library-badge">${ds.format.toUpperCase()}</span>` : ''}
+          </div>
+        </div>
+      `;
+      libraryContainer.appendChild(card);
+    });
+  };
+
+  const switchTab = (tabName) => {
+    currentTab = tabName;
+    if (tabName === 'groups') {
+      tabBtnGroups?.classList.add('active');
+      tabBtnLibrary?.classList.remove('active');
+      if (tabGroups) tabGroups.style.display = 'flex';
+      if (tabLibrary) tabLibrary.style.display = 'none';
+    } else {
+      tabBtnGroups?.classList.remove('active');
+      tabBtnLibrary?.classList.add('active');
+      if (tabGroups) tabGroups.style.display = 'none';
+      if (tabLibrary) tabLibrary.style.display = 'flex';
+      renderLibrary();
+    }
   };
 
   // --- Initialize ---
@@ -559,7 +691,77 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderGroups();
   updateStatus('SYSTEM READY');
 
+  // Pre-load marketplace index in background
+  fetchMarketplaceIndex(false).then(data => { marketplaceData = data; }).catch(() => {});
+
   // --- Listeners ---
+  // Tab switching
+  tabBtnGroups?.addEventListener('click', () => switchTab('groups'));
+  tabBtnLibrary?.addEventListener('click', () => switchTab('library'));
+
+  // Library Search
+  librarySearchInput?.addEventListener('input', (e) => {
+    librarySearchQuery = e.target.value.trim();
+    renderLibrary();
+  });
+
+  // Library Category Pills
+  libraryCategoryPills?.addEventListener('click', (e) => {
+    const pill = e.target.closest('.category-pill');
+    if (!pill) return;
+    const category = pill.dataset.category;
+    if (!category) return;
+    selectedCategory = category;
+    libraryCategoryPills.querySelectorAll('.category-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    renderLibrary();
+  });
+
+  // Library Manual Refresh
+  libraryRefreshBtn?.addEventListener('click', async () => {
+    libraryRefreshBtn.textContent = '…';
+    libraryRefreshBtn.disabled = true;
+    updateStatus('REFRESHING MARKETPLACE...');
+    try {
+      marketplaceData = await fetchMarketplaceIndex(true);
+      await renderLibrary();
+      updateStatus('MARKETPLACE REFRESHED');
+    } catch (err) {
+      console.error('[Marketplace] Refresh error:', err);
+      updateStatus(`REFRESH FAILED: ${err.message.slice(0, 30)}`);
+    } finally {
+      libraryRefreshBtn.textContent = '↻ REFRESH';
+      libraryRefreshBtn.disabled = false;
+    }
+  });
+
+  // Library Click-to-Add
+  libraryContainer?.addEventListener('click', async (e) => {
+    const addBtn = e.target.closest('.library-add-btn:not(.installed)');
+    if (!addBtn || addBtn.disabled) return;
+    const datasetId = addBtn.dataset.datasetId;
+    const dataset = marketplaceData?.datasets?.find(d => d.id === datasetId);
+    if (!dataset) return;
+
+    addBtn.textContent = 'ADDING...';
+    addBtn.disabled = true;
+    updateStatus(`ADDING ${dataset.name.toUpperCase()}...`);
+
+    try {
+      const res = await installDataset(dataset, profileManager, preferences, activeGroups);
+      addBtn.textContent = 'ADDED ✓';
+      addBtn.classList.add('installed');
+      updateStatus(`ADDED "${dataset.name.toUpperCase()}" (${res.imported} GROUP${res.imported !== 1 ? 'S' : ''})`);
+      await renderGroups();
+      await renderLibrary();
+    } catch (err) {
+      console.error('[Marketplace] Install failed:', err);
+      updateStatus(`ADD FAILED: ${err.message.slice(0, 35)}`);
+      addBtn.textContent = '+ ADD';
+      addBtn.disabled = false;
+    }
+  });
+
   nightModeToggle.addEventListener('click', async () => {
     preferences.nightMode = !preferences.nightMode;
     
