@@ -138,10 +138,18 @@ async function syncGroup(profileUuid, groupUuid) {
   }
 
   let pois;
+  let exportGroup = null;
   try {
     const trimmed = text.trimStart();
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-      pois = parseJSON(text);
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].data && parsed[0].name) {
+        // Shullow export format (JSON with embedded CSV + logo)
+        exportGroup = parsed.find(g => g.name === group.name) || parsed[0];
+        pois = parseCSV(exportGroup.data);
+      } else {
+        pois = parseJSON(text);
+      }
     } else {
       pois = parseCSV(text);
     }
@@ -153,6 +161,20 @@ async function syncGroup(profileUuid, groupUuid) {
       contentHash: group.contentHash ?? null
     });
     return { lastSynced: now, lastSyncStatus: 'error', lastSyncError: parseErr.message };
+  }
+
+  // Update styles if export group has them
+  if (exportGroup) {
+    if (!profile.groupStyles) profile.groupStyles = {};
+    if (!profile.groupStyles[groupUuid]) profile.groupStyles[groupUuid] = {};
+    if (exportGroup.colors?.primary) profile.groupStyles[groupUuid].color = exportGroup.colors.primary;
+    if (exportGroup.colors?.secondary) profile.groupStyles[groupUuid].secondaryColor = exportGroup.colors.secondary;
+    if (exportGroup.icon && exportGroup.icon.length < 50000) {
+      profile.groupStyles[groupUuid].logoData = exportGroup.icon;
+    }
+    const allProfiles = (await chrome.storage.local.get(['profiles'])).profiles || {};
+    allProfiles[profileUuid] = profile;
+    await chrome.storage.local.set({ profiles: allProfiles });
   }
 
   await updateGroupPOIs(profileUuid, groupUuid, pois, {

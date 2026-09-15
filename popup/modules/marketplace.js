@@ -134,17 +134,17 @@ export async function installDataset(dataset, profileManager, preferences, activ
           group.sourceUrl = dataset.url;
           activeGroups[uuid] = true;
 
-          // Apply custom colors if dataset specifies them
-          if (dataset.colors?.primary) {
-            if (!freshActiveProfile.groupStyles) freshActiveProfile.groupStyles = {};
-            freshActiveProfile.groupStyles[uuid] = {
-              color: dataset.colors.primary,
-              secondaryColor: dataset.colors.secondary || '#ffffff',
-              logoData: null
-            };
-            if (!preferences.groupStyles) preferences.groupStyles = {};
-            preferences.groupStyles[uuid] = freshActiveProfile.groupStyles[uuid];
-          }
+          // Apply custom colors and preserve logoData from freshActiveProfile.groupStyles
+          if (!freshActiveProfile.groupStyles) freshActiveProfile.groupStyles = {};
+          const currentStyle = freshActiveProfile.groupStyles[uuid] || {};
+
+          freshActiveProfile.groupStyles[uuid] = {
+            color: dataset.colors?.primary || currentStyle.color || '#4a9eff',
+            secondaryColor: dataset.colors?.secondary || currentStyle.secondaryColor || '#ffffff',
+            logoData: currentStyle.logoData || null
+          };
+          if (!preferences.groupStyles) preferences.groupStyles = {};
+          preferences.groupStyles[uuid] = freshActiveProfile.groupStyles[uuid];
         }
       }
     }

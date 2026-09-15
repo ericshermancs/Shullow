@@ -1015,16 +1015,40 @@ export async function saveGroupFromUrl(url, groupName) {
 
         const groupName = fileGroup.name;
 
-        // Check if a group from this URL with this name already exists
-        if (existingFromUrl[groupName]) {
-          // Update existing group's POIs and metadata
-          const existingUuid = existingFromUrl[groupName];
+        // Check if a group from this URL or with this name already exists
+        let existingUuid = existingFromUrl[groupName];
+        if (!existingUuid) {
+          for (const [uuid, group] of Object.entries(activeProfile.groups)) {
+            if (group.name && group.name.toLowerCase() === groupName.toLowerCase()) {
+              existingUuid = uuid;
+              break;
+            }
+          }
+        }
+
+        if (existingUuid) {
+          // Update existing group's POIs, sourceUrl, and metadata
           activeProfile.groups[existingUuid].pois = pois;
+          activeProfile.groups[existingUuid].sourceUrl = url;
           activeProfile.groups[existingUuid].lastSynced = now;
           activeProfile.groups[existingUuid].lastSyncStatus = 'success';
           activeProfile.groups[existingUuid].lastSyncError = null;
           activeProfile.groups[existingUuid].contentHash = contentHash;
-          // Preserve other fields like syncEnabled
+
+          // Always update styles & logoData from the export file
+          if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+          if (!activeProfile.groupStyles[existingUuid]) activeProfile.groupStyles[existingUuid] = {};
+          if (fileGroup.colors?.primary) {
+            activeProfile.groupStyles[existingUuid].color = fileGroup.colors.primary;
+          }
+          if (fileGroup.colors?.secondary) {
+            activeProfile.groupStyles[existingUuid].secondaryColor = fileGroup.colors.secondary;
+          }
+          if (fileGroup.icon && fileGroup.icon.length < 50000) {
+            activeProfile.groupStyles[existingUuid].logoData = fileGroup.icon;
+          }
+
+          existingFromUrl[groupName] = existingUuid;
           processedCount++;
         } else {
           // Create new group

@@ -2,7 +2,7 @@ import { loadPOIGroups, savePOIs, savePOIsBatch, importData, deletePOIGroup, ren
 import { ColorWheel } from './modules/color-wheel.js';
 import { StorageManager } from './modules/storage.js';
 import { profileManager } from './modules/profile-manager.js';
-import { fetchMarketplaceIndex, isDatasetInstalled, installDataset } from './modules/marketplace.js';
+import { fetchMarketplaceIndex, isDatasetInstalled, installDataset, getInstalledGroupUuid } from './modules/marketplace.js';
 
 const PIN_SVG = (color, secondary) => `
 <svg class="pin-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -599,21 +599,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     libraryContainer.innerHTML = '';
     filtered.forEach(ds => {
       const isInstalled = isDatasetInstalled(ds, activeProfile);
-      const priColor = ds.colors?.primary || '#4a9eff';
-      const secColor = ds.colors?.secondary || '#ffffff';
+      const installedUuid = getInstalledGroupUuid(ds, activeProfile);
+      const installedStyle = installedUuid ? (activeProfile?.groupStyles?.[installedUuid] || preferences.groupStyles?.[installedUuid]) : null;
+      const priColor = installedStyle?.color || ds.colors?.primary || '#4a9eff';
+      const secColor = installedStyle?.secondaryColor || ds.colors?.secondary || '#ffffff';
+      const iconPreview = installedStyle?.logoData ? `<img src="${installedStyle.logoData}" class="pin-icon">` : PIN_SVG(priColor, secColor);
 
       const card = document.createElement('div');
       card.className = 'library-card';
       card.innerHTML = `
         <div class="library-card-header">
           <div class="library-card-title-area">
-            <div class="library-pin-preview">${PIN_SVG(priColor, secColor)}</div>
+            <div class="library-pin-preview">${iconPreview}</div>
             <div style="min-width: 0; flex: 1;">
               <div class="library-card-title" title="${ds.name}">${ds.name}</div>
               <div class="library-card-author">${ds.author || 'Community'}</div>
             </div>
           </div>
-          <button class="library-add-btn ${isInstalled ? 'installed' : ''}" data-dataset-id="${ds.id}" ${isInstalled ? 'disabled' : ''}>
+          <button class="library-add-btn ${isInstalled ? 'installed' : ''}" data-dataset-id="${ds.id}" title="${isInstalled ? 'Click to re-sync dataset & logo' : 'Add to active profile'}">
             ${isInstalled ? 'ADDED ✓' : '+ ADD'}
           </button>
         </div>
@@ -665,9 +668,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
   
-  // Load groupStyles from the active profile
-  if (activeProfile && activeProfile.groupStyles) {
-    preferences.groupStyles = { ...activeProfile.groupStyles };
+  // Load groupStyles from active profile and ensure logoData is preserved across both
+  if (activeProfile) {
+    if (!activeProfile.groupStyles) activeProfile.groupStyles = {};
+    if (!preferences.groupStyles) preferences.groupStyles = {};
+    for (const [uuid, pStyle] of Object.entries(activeProfile.groupStyles)) {
+      if (!preferences.groupStyles[uuid]) {
+        preferences.groupStyles[uuid] = { ...pStyle };
+      } else {
+        if (!preferences.groupStyles[uuid].logoData && pStyle.logoData) {
+          preferences.groupStyles[uuid].logoData = pStyle.logoData;
+        } else if (!pStyle.logoData && preferences.groupStyles[uuid].logoData) {
+          pStyle.logoData = preferences.groupStyles[uuid].logoData;
+        }
+      }
+    }
+    preferences.groupStyles = { ...preferences.groupStyles, ...activeProfile.groupStyles };
   }
   
   // Migrate old yellow theme to new blue theme
@@ -735,29 +751,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Library Click-to-Add
+  // Library Click-to-Add / Re-sync
   libraryContainer?.addEventListener('click', async (e) => {
-    const addBtn = e.target.closest('.library-add-btn:not(.installed)');
+    const addBtn = e.target.closest('.library-add-btn');
     if (!addBtn || addBtn.disabled) return;
     const datasetId = addBtn.dataset.datasetId;
     const dataset = marketplaceData?.datasets?.find(d => d.id === datasetId);
     if (!dataset) return;
 
-    addBtn.textContent = 'ADDING...';
+    const isReinstall = addBtn.classList.contains('installed');
+    addBtn.textContent = isReinstall ? 'SYNCING...' : 'ADDING...';
     addBtn.disabled = true;
-    updateStatus(`ADDING ${dataset.name.toUpperCase()}...`);
+    updateStatus(`${isReinstall ? 'SYNCING' : 'ADDING'} ${dataset.name.toUpperCase()}...`);
 
     try {
       const res = await installDataset(dataset, profileManager, preferences, activeGroups);
-      addBtn.textContent = 'ADDED ✓';
+      addBtn.textContent = isReinstall ? 'UPDATED ✓' : 'ADDED ✓';
       addBtn.classList.add('installed');
-      updateStatus(`ADDED "${dataset.name.toUpperCase()}" (${res.imported} GROUP${res.imported !== 1 ? 'S' : ''})`);
+      addBtn.disabled = false;
+      updateStatus(`${isReinstall ? 'UPDATED' : 'ADDED'} "${dataset.name.toUpperCase()}" (${res.imported} GROUP${res.imported !== 1 ? 'S' : ''})`);
       await renderGroups();
       await renderLibrary();
     } catch (err) {
       console.error('[Marketplace] Install failed:', err);
-      updateStatus(`ADD FAILED: ${err.message.slice(0, 35)}`);
-      addBtn.textContent = '+ ADD';
+      updateStatus(`${isReinstall ? 'SYNC' : 'ADD'} FAILED: ${err.message.slice(0, 35)}`);
+      addBtn.textContent = isReinstall ? 'ADDED ✓' : '+ ADD';
       addBtn.disabled = false;
     }
   });
